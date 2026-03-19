@@ -1,0 +1,10 @@
+{
+  "sap.app": {
+    "id": "com.percipere.sac.percibot",
+    "type": "component",
+    "i18n": "i18n/i18n.properties",
+    "title": "PerciBot SAC Custom Widget",
+    "description": "Minimal ChatGPT-like custom widget with API key & model selector",
+    "applicationVersion": { "version": "1.0.0" }
+  }
+}

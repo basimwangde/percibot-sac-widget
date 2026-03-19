@@ -1,0 +1,81 @@
+{
+  "eula": "",
+  "license": "",
+  "vendor": "Percipere Consulting",
+  "id": "com.percipere.sac.percibot",
+  "version": "1.0.0",
+  "name": "PerciBOT",
+  "newInstancePrefix": "PerciBOT",
+  "description": "Conversational AI assistant for SAP Analytics Cloud powered by OpenAI",
+
+  "webcomponents": [
+    {
+      "kind": "main",
+      "tag": "perci-bot",
+      "url": "https://basimwangde.github.io/OPENAI-SAC-CUSTOM-WIDGET/src/chat-widget.js",
+      "integrity": "",
+      "ignoreIntegrity": true
+    },
+    {
+      "kind": "builder",
+      "tag": "perci-bot-builder",
+      "url": "https://basimwangde.github.io/OPENAI-SAC-CUSTOM-WIDGET/src/builder.js",
+      "integrity": "",
+      "ignoreIntegrity": true
+    }
+  ],
+  "properties": {
+    "width":        { "type": "integer", "default": 1 },
+    "height":       { "type": "integer", "default": 1 },
+
+    "apiKey":       { "type": "string",  "default": "" },
+    "model":        { "type": "string",  "default": "gpt-3.5-turbo" },
+
+    "systemPrompt": { "type": "string",  "default": "You are PerciBot, a helpful and concise assistant for SAP Analytics Cloud." },
+    "welcomeText":  { "type": "string",  "default": "Hello, I’m PerciBot! How can I assist you today?" },
+
+    "primaryColor": { "type": "string",  "default": "#1f4fbf" },
+    "primaryDark":  { "type": "string",  "default": "#163a8a" },
+    "accentColor":  { "type": "string",  "default": "#3cc0ff" },
+    "surfaceColor": { "type": "string",  "default": "#ffffff" },
+    "surfaceAlt":   { "type": "string",  "default": "#f6f8ff" },
+    "textColor":    { "type": "string",  "default": "#0b1221" },
+    "datasets": { "type": "string", "default": "" },
+    "summaryResponse": { "type": "string", "default": "" },
+    "summaryPrompt": { "type": "string", "default": "" }
+  },
+
+  "methods": {
+    "setDatasets": 
+    {
+      "description": "Attach datasets (JSON string with { name:{schema,types,rows2D}... }).",
+      "parameters": [
+        {
+        "name": "payload",
+        "type":"string",
+        "description": "datasets (JSON string with { name:{schema,types,rows2D}... })."
+        }
+      ],
+      "body": "this.datasets = payload;"
+    },
+    "generateSummary": 
+    {
+      "description": "Generate a summary of the datasets.",
+      "parameters": [
+        {
+        "name": "payload",
+        "type":"string",
+        "description": "Prompt to guide the summary generation."
+        }
+      ],
+      "body": "this.summaryPrompt = payload;"
+    },
+
+    "getLastSummary": {
+      "description": "Return the last generated summary string.",
+      "parameters": [],
+      "returnType": "string"
+    }
+   },
+  "events":  { }
+}
