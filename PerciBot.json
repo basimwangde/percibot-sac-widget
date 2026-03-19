@@ -2,24 +2,24 @@
   "eula": "",
   "license": "",
   "vendor": "Percipere Consulting",
-  "id": "com.percipere.sac.percibot",
+  "id": "com.percipere.sac.percibot.presales",
   "version": "1.0.0",
-  "name": "PerciBOT",
-  "newInstancePrefix": "PerciBOT",
-  "description": "Conversational AI assistant for SAP Analytics Cloud powered by OpenAI",
+  "name": "PerciBOT_Presales",
+  "newInstancePrefix": "PerciBOT_Presales",
+  "description": "Conversational AI assistant for SAP Analytics Cloud powered by PerciBOT backend",
 
   "webcomponents": [
     {
       "kind": "main",
       "tag": "perci-bot",
-      "url": "https://basimwangde.github.io/OPENAI-SAC-CUSTOM-WIDGET/src/chat-widget.js",
+      "url": "https://basimwangde.github.io/percibot-sac-widget/src/chat-widget.js",
       "integrity": "",
       "ignoreIntegrity": true
     },
     {
       "kind": "builder",
       "tag": "perci-bot-builder",
-      "url": "https://basimwangde.github.io/OPENAI-SAC-CUSTOM-WIDGET/src/builder.js",
+      "url": "https://basimwangde.github.io/percibot-sac-widget/src/builder.js",
       "integrity": "",
       "ignoreIntegrity": true
     }
@@ -32,7 +32,7 @@
     "model":        { "type": "string",  "default": "gpt-3.5-turbo" },
 
     "systemPrompt": { "type": "string",  "default": "You are PerciBot, a helpful and concise assistant for SAP Analytics Cloud." },
-    "welcomeText":  { "type": "string",  "default": "Hello, I’m PerciBot! How can I assist you today?" },
+    "welcomeText":  { "type": "string",  "default": "Hello, I'm PerciBot! How can I assist you today?" },
 
     "primaryColor": { "type": "string",  "default": "#1f4fbf" },
     "primaryDark":  { "type": "string",  "default": "#163a8a" },
@@ -40,42 +40,45 @@
     "surfaceColor": { "type": "string",  "default": "#ffffff" },
     "surfaceAlt":   { "type": "string",  "default": "#f6f8ff" },
     "textColor":    { "type": "string",  "default": "#0b1221" },
-    "datasets": { "type": "string", "default": "" },
+    "datasets":     { "type": "string",  "default": "" },
     "summaryResponse": { "type": "string", "default": "" },
-    "summaryPrompt": { "type": "string", "default": "" }
+    "summaryPrompt":   { "type": "string", "default": "" },
+
+    "backendUrl":       { "type": "string", "default": "" },
+    "answerPrompt":     { "type": "string", "default": "" },
+    "behaviourPrompt":  { "type": "string", "default": "" },
+    "schemaPrompt":     { "type": "string", "default": "" },
+    "clientId":         { "type": "string", "default": "" }
   },
 
   "methods": {
-    "setDatasets": 
-    {
+    "setDatasets": {
       "description": "Attach datasets (JSON string with { name:{schema,types,rows2D}... }).",
       "parameters": [
         {
-        "name": "payload",
-        "type":"string",
-        "description": "datasets (JSON string with { name:{schema,types,rows2D}... })."
+          "name": "payload",
+          "type": "string",
+          "description": "datasets (JSON string with { name:{schema,types,rows2D}... })."
         }
       ],
       "body": "this.datasets = payload;"
     },
-    "generateSummary": 
-    {
+    "generateSummary": {
       "description": "Generate a summary of the datasets.",
       "parameters": [
         {
-        "name": "payload",
-        "type":"string",
-        "description": "Prompt to guide the summary generation."
+          "name": "payload",
+          "type": "string",
+          "description": "Prompt to guide the summary generation."
         }
       ],
       "body": "this.summaryPrompt = payload;"
     },
-
     "getLastSummary": {
       "description": "Return the last generated summary string.",
       "parameters": [],
       "returnType": "string"
     }
-   },
-  "events":  { }
+  },
+  "events": {}
 }

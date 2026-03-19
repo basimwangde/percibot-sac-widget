@@ -1,4 +1,4 @@
-/* PerciBot — Builder Panel (palettes + color pickers + Update/Reset) */
+/* PerciBot — Builder Panel (palettes + color pickers + backend/prompt config + Update/Reset) */
 (function () {
   const tpl = document.createElement('template');
   tpl.innerHTML = `
@@ -16,8 +16,10 @@
       }
       input[type="color"]{ padding:6px; height:40px }
       input:focus, select:focus, textarea:focus{border-color:#4d9aff; box-shadow:0 0 0 2px rgba(77,154,255,.15)}
-      textarea{min-height:90px; resize:vertical}
+      textarea{resize:vertical}
+      textarea.prompt{min-height:120px}
       .hint{font-size:12px; opacity:.65}
+      .warn{font-size:12px; color:#b45309}
       .toolbar{display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:16px; padding-top:12px; border-top:1px solid #e7eaf0}
       button{ padding:10px 14px; border:1px solid #d0d3da; border-radius:10px; background:#fff; cursor:pointer }
       button[disabled]{opacity:.5; cursor:not-allowed}
@@ -40,9 +42,14 @@
         transition:all .25s ease
       }
       .toast.show{opacity:1; transform:translateY(0)}
+      .divider{border:none; border-top:1px solid #e7eaf0; margin:18px 0}
     </style>
 
     <div class="panel">
+
+      <!-- ════════════════════════════════════════
+           SECTION 1 — Connection (existing)
+           ════════════════════════════════════════ -->
       <div class="section">
         <div class="title">Connection</div>
         <div class="f keywrap">
@@ -63,10 +70,61 @@
           </div>
           <div class="f">
             <label>Welcome Text</label>
-            <input id="welcomeText" type="text" placeholder="Hello, I’m PerciBot! How can I assist you?" />
+            <input id="welcomeText" type="text" placeholder="Hello, I'm PerciBot! How can I assist you?" />
           </div>
         </div>
       </div>
+
+      <hr class="divider" />
+
+      <!-- ════════════════════════════════════════
+           SECTION 2 — Backend & Prompts (NEW)
+           ════════════════════════════════════════ -->
+      <div class="section">
+        <div class="title">Backend &amp; Prompts</div>
+
+        <!-- Row 1: Backend URL + Client ID -->
+        <div class="grid" style="margin-bottom:12px">
+          <div class="f">
+            <label>Backend URL</label>
+            <input id="backendUrl" type="text" placeholder="https://your-backend-url.com" />
+            <div class="hint">Base URL of the PerciBOT FastAPI backend.</div>
+            <div class="warn">Ensure CORS is enabled on the backend.</div>
+          </div>
+          <div class="f">
+            <label>Client ID</label>
+            <input id="clientId" type="text" placeholder="e.g. smartstream, futuroot, demo-finance" />
+            <div class="hint">Identifier for the active client / demo context.</div>
+          </div>
+        </div>
+
+        <!-- Answer Prompt -->
+        <div class="f" style="margin-bottom:12px">
+          <label>Answer Prompt</label>
+          <textarea id="answerPrompt" class="prompt" placeholder="Template for L2 answer generation…"></textarea>
+          <div class="hint">Template for L2 answer generation. No character limit.</div>
+        </div>
+
+        <!-- Behaviour Prompt -->
+        <div class="f" style="margin-bottom:12px">
+          <label>Behaviour Prompt</label>
+          <textarea id="behaviourPrompt" class="prompt" placeholder="SQL generation rules and constraints for L1 chain…"></textarea>
+          <div class="hint">SQL generation rules and constraints for L1 chain.</div>
+        </div>
+
+        <!-- Schema Prompt -->
+        <div class="f">
+          <label>Schema Prompt</label>
+          <textarea id="schemaPrompt" class="prompt" placeholder="Active table schema and column definitions…"></textarea>
+          <div class="hint">Active table schema and column definitions. May be large.</div>
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- ════════════════════════════════════════
+           SECTION 3 — Behaviour (existing)
+           ════════════════════════════════════════ -->
       <div class="section">
         <div class="title">Behavior</div>
         <div class="f">
@@ -75,6 +133,11 @@
         </div>
       </div>
 
+      <hr class="divider" />
+
+      <!-- ════════════════════════════════════════
+           SECTION 4 — Theme (existing)
+           ════════════════════════════════════════ -->
       <div class="section">
         <div class="title">Theme</div>
 
@@ -92,6 +155,9 @@
         <div id="themeError" class="danger" style="margin-top:6px; display:none"></div>
       </div>
 
+      <!-- ════════════════════════════════════════
+           TOOLBAR
+           ════════════════════════════════════════ -->
       <div class="toolbar">
         <span class="chip" id="statusChip">No changes</span>
         <button id="resetBtn">Reset</button>
@@ -102,7 +168,7 @@
     <div class="toast" id="toast">Saved</div>
   `;
 
-  const HEX = /^#([0-9a-fA-F]{6})$/; // color inputs always give #rrggbb
+  const HEX = /^#([0-9a-fA-F]{6})$/;
 
   class PerciBotBuilder extends HTMLElement {
     constructor() {
@@ -111,20 +177,25 @@
       this.shadowRoot.appendChild(tpl.content.cloneNode(true));
       this.$ = id => this.shadowRoot.getElementById(id);
 
+      // ── All tracked keys — existing + new ──────────────────────────────────
       this.keys = [
-        'apiKey','model','systemPrompt','welcomeText',
-        'primaryColor','primaryDark','surfaceColor','surfaceAlt','textColor'
+        // Existing
+        'apiKey', 'model', 'systemPrompt', 'welcomeText',
+        'primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor',
+        // New
+        'backendUrl', 'clientId', 'answerPrompt', 'behaviourPrompt', 'schemaPrompt'
       ];
+
       this.inputs = this.keys.map(k => this.$(k));
 
-      // show/hide key
+      // Show / hide API key
       this.$('toggleKey').addEventListener('click', () => {
         const inp = this.$('apiKey');
         inp.type = (inp.type === 'password' ? 'text' : 'password');
         this.$('toggleKey').textContent = inp.type === 'password' ? 'Show' : 'Hide';
       });
 
-      // dirty tracking
+      // Dirty tracking — wire every input/textarea/select
       const markDirty = () => this._setDirty(true);
       this.inputs.forEach(el => {
         if (!el) return;
@@ -132,11 +203,11 @@
         el.addEventListener('change', markDirty);
       });
 
-      // actions
+      // Toolbar actions
       this.$('resetBtn').addEventListener('click', () => this._reset());
       this.$('updateBtn').addEventListener('click', () => this._update());
 
-      // Palettes
+      // Colour palettes
       this._palettes = [
         {
           name: 'SAC Blue',
@@ -172,6 +243,8 @@
       this._renderPalettes();
     }
 
+    // ── SAC lifecycle hooks ────────────────────────────────────────────────────
+
     onCustomWidgetBuilderInit(host) {
       this._apply((host && host.properties) || {});
       this._initial = { ...this._props };
@@ -181,36 +254,52 @@
       this._apply(changedProps, /*external*/true);
     }
 
+    // ── Palette rendering ──────────────────────────────────────────────────────
+
     _renderPalettes() {
       const root = this.$('palettes');
-      const mk = (t,c) => { const e=document.createElement(t); if(c) e.className=c; return e; };
+      const mk = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
       this._palettes.forEach(p => {
-        const card = mk('div','pal-card');
-        const sw   = mk('div','pal-sw');
-        ['primaryColor','primaryDark','surfaceColor','surfaceAlt','textColor'].forEach(k=>{
-          const s = mk('div','pal-s'); s.style.background = p[k]; sw.appendChild(s);
+        const card = mk('div', 'pal-card');
+        const sw   = mk('div', 'pal-sw');
+        ['primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor'].forEach(k => {
+          const s = mk('div', 'pal-s'); s.style.background = p[k]; sw.appendChild(s);
         });
-        const name = mk('div','pal-name'); name.textContent = p.name;
+        const name = mk('div', 'pal-name'); name.textContent = p.name;
         card.appendChild(sw); card.appendChild(name);
         card.addEventListener('click', () => {
-          Object.entries(p).forEach(([k,v]) => { if (k!=='name' && this.$(k)) this.$(k).value = v; });
+          Object.entries(p).forEach(([k, v]) => { if (k !== 'name' && this.$(k)) this.$(k).value = v; });
           this._setDirty(true);
         });
         root.appendChild(card);
       });
     }
 
+    // ── State management ───────────────────────────────────────────────────────
+
+    /**
+     * Apply a property map to internal state and DOM inputs.
+     * @param {object}  p         Property map (may be partial).
+     * @param {boolean} external  When true, skip dirty-flag reset (SAC pushed the change).
+     */
     _apply(p = {}, external = false) {
       this._props = {
-        apiKey:       p.apiKey ?? '',
-        model:        p.model ?? 'gpt-3.5-turbo',
-        systemPrompt: p.systemPrompt ?? 'You are PerciBot, a helpful and concise assistant for SAP Analytics Cloud.',
-        welcomeText:  p.welcomeText ?? 'Hello, I’m PerciBot! How can I assist you?',
-        primaryColor: p.primaryColor ?? '#1f4fbf',
-        primaryDark:  p.primaryDark ?? '#163a8a',
-        surfaceColor: p.surfaceColor ?? '#ffffff',
-        surfaceAlt:   p.surfaceAlt ?? '#f6f8ff',
-        textColor:    p.textColor ?? '#0b1221'
+        // Existing properties
+        apiKey:          p.apiKey          ?? '',
+        model:           p.model           ?? 'gpt-3.5-turbo',
+        systemPrompt:    p.systemPrompt    ?? 'You are PerciBot, a helpful and concise assistant for SAP Analytics Cloud.',
+        welcomeText:     p.welcomeText     ?? 'Hello, I\u2019m PerciBOT! How can I assist you?',
+        primaryColor:    p.primaryColor    ?? '#1f4fbf',
+        primaryDark:     p.primaryDark     ?? '#163a8a',
+        surfaceColor:    p.surfaceColor    ?? '#ffffff',
+        surfaceAlt:      p.surfaceAlt      ?? '#f6f8ff',
+        textColor:       p.textColor       ?? '#0b1221',
+        // New properties
+        backendUrl:      p.backendUrl      ?? '',
+        clientId:        p.clientId        ?? '',
+        answerPrompt:    p.answerPrompt    ?? '',
+        behaviourPrompt: p.behaviourPrompt ?? '',
+        schemaPrompt:    p.schemaPrompt    ?? '',
       };
 
       this.keys.forEach(k => { if (this.$(k)) this.$(k).value = this._props[k]; });
@@ -218,12 +307,14 @@
       this._validateTheme();
     }
 
+    // ── Theme validation ───────────────────────────────────────────────────────
+
     _validateTheme() {
-      const ids = ['primaryColor','primaryDark','surfaceColor','surfaceAlt','textColor'];
-      const bad = ids.filter(id => !HEX.test((this.$(id).value || '').trim().toLowerCase()));
-      const err = this.$('themeError');
+      const ids  = ['primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor'];
+      const bad  = ids.filter(id => !HEX.test((this.$(id).value || '').trim().toLowerCase()));
+      const err  = this.$('themeError');
       if (bad.length) {
-        err.textContent = 'Please choose valid colors.';
+        err.textContent  = 'Please choose valid colors.';
         err.style.display = 'block';
       } else {
         err.style.display = 'none';
@@ -237,47 +328,62 @@
       this.$('statusChip').textContent = this._dirty ? 'Unsaved changes' : 'No changes';
     }
 
+    // ── Collect current DOM values ─────────────────────────────────────────────
+
     _collect() {
-      const get = id => (this.$(id).value || '').trim();
-      // color inputs return #rrggbb (already valid)
+      const get = id => (this.$(id) ? this.$(id).value : '');
       return {
-        apiKey:       get('apiKey'),
-        model:        get('model'),
-        systemPrompt: get('systemPrompt'),
-        welcomeText:  get('welcomeText'),
-        primaryColor: get('primaryColor'),
-        primaryDark:  get('primaryDark'),
-        surfaceColor: get('surfaceColor'),
-        surfaceAlt:   get('surfaceAlt'),
-        textColor:    get('textColor')
+        // Existing
+        apiKey:          get('apiKey'),
+        model:           get('model'),
+        systemPrompt:    get('systemPrompt'),
+        welcomeText:     get('welcomeText'),
+        primaryColor:    get('primaryColor'),
+        primaryDark:     get('primaryDark'),
+        surfaceColor:    get('surfaceColor'),
+        surfaceAlt:      get('surfaceAlt'),
+        textColor:       get('textColor'),
+        // New — no trimming on prompts; preserve whitespace as authored
+        backendUrl:      get('backendUrl').trim(),
+        clientId:        get('clientId').trim(),
+        answerPrompt:    get('answerPrompt'),
+        behaviourPrompt: get('behaviourPrompt'),
+        schemaPrompt:    get('schemaPrompt'),
       };
     }
+
+    // ── Toolbar actions ────────────────────────────────────────────────────────
 
     _update() {
       if (!this._validateTheme()) return;
       const props = this._collect();
-      this.dispatchEvent(new CustomEvent('propertiesChanged', { detail: { properties: props }}));
-      this.dispatchEvent(new CustomEvent('propertiesChanged', {
-        detail: { properties: props },
-        bubbles: true,
-        composed: true
-    }));
-      this._props = { ...props };
-      this._initial = { ...props };  // new baseline
+
+      // Fire propertiesChanged so SAC propagates to the live widget immediately.
+      const evt = new CustomEvent('propertiesChanged', {
+        detail:   { properties: props },
+        bubbles:  true,
+        composed: true,
+      });
+      this.dispatchEvent(evt);
+
+      this._props   = { ...props };
+      this._initial = { ...props };
       this._setDirty(false);
       this._toast('Saved');
     }
 
     _reset() {
       this._apply(this._initial);
-      this.dispatchEvent(new CustomEvent('propertiesChanged', { detail: { properties: { ...this._initial } }}));
-      this.dispatchEvent(new CustomEvent('propertiesChanged', {
-        detail: { properties: { ...this._initial } },
-        bubbles: true,
-        composed: true
-     }));
+      const evt = new CustomEvent('propertiesChanged', {
+        detail:   { properties: { ...this._initial } },
+        bubbles:  true,
+        composed: true,
+      });
+      this.dispatchEvent(evt);
       this._setDirty(false);
     }
+
+    // ── Toast notification ─────────────────────────────────────────────────────
 
     _toast(msg) {
       const t = this.$('toast');
