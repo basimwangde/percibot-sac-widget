@@ -1,6 +1,33 @@
-/* PerciBot — Builder Panel (palettes + color pickers + backend/prompt config + Update/Reset) */
+/* PerciBot — Builder Panel
+   Sections: Connection | Backend & Prompts | Theme
+   Test Connection fires on button click, encrypts the API key with XOR+Base64
+   matching the backend's simple_crypto.py, and shows an inline status indicator.
+*/
 (function () {
-  const tpl = document.createElement('template');
+  // ---------------------------------------------------------------------------
+  // XOR + URL-safe Base64 encryption
+  // Must match utilities/simple_crypto.py on the backend.
+  // Key must equal the PERCIBOT_CRYPTO_KEY environment variable on the server.
+  // WARNING: This is obfuscation only, not cryptographic security.
+  // ---------------------------------------------------------------------------
+  const CRYPTO_KEY = 'percibot-default-key'
+
+  function xorEncrypt (plaintext) {
+    const enc   = new TextEncoder()
+    const ptB   = enc.encode(plaintext)
+    const keyB  = enc.encode(CRYPTO_KEY)
+    const xored = ptB.map((b, i) => b ^ keyB[i % keyB.length])
+    // URL-safe base64, no padding — mirrors Python urlsafe_b64encode().rstrip(b'=')
+    return btoa(String.fromCharCode(...xored))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '')
+  }
+
+  // ---------------------------------------------------------------------------
+  // Template
+  // ---------------------------------------------------------------------------
+  const tpl = document.createElement('template')
   tpl.innerHTML = `
     <style>
       :host{display:block; font:14px/1.5 var(--sapFontFamily,"72",Arial); color:var(--sapTextColor,#0b1221)}
@@ -21,17 +48,20 @@
       .hint{font-size:12px; opacity:.65}
       .warn{font-size:12px; color:#b45309}
       .toolbar{display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:16px; padding-top:12px; border-top:1px solid #e7eaf0}
-      button{ padding:10px 14px; border:1px solid #d0d3da; border-radius:10px; background:#fff; cursor:pointer }
+      button{ padding:10px 14px; border:1px solid #d0d3da; border-radius:10px; background:#fff; cursor:pointer; font-size:13px }
       button[disabled]{opacity:.5; cursor:not-allowed}
       .primary{ background:#1f4fbf; color:#fff; border-color:#1f4fbf }
+      .btn-test{ padding:8px 12px; font-size:12px; border-radius:8px; white-space:nowrap }
       .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#f5f7fb; border:1px solid #e7eaf0; font-size:12px}
       .keywrap{position:relative}
-      .reveal{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:transparent; border:none; cursor:pointer; opacity:.7; font-size:12px }
+      .reveal{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:transparent; border:none; cursor:pointer; opacity:.7; font-size:12px; padding:4px }
       .danger{color:#b00020; font-size:12px}
+      .conn-status{ font-size:12px; font-weight:600; padding:4px 8px; border-radius:6px; display:none }
+      .conn-status.ok  { display:inline-block; background:#d1fae5; color:#065f46 }
+      .conn-status.err { display:inline-block; background:#fee2e2; color:#991b1b }
+      .conn-status.checking { display:inline-block; background:#fef3c7; color:#92400e }
       .palettes{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
-      .pal-card{
-        display:flex; align-items:center; gap:10px; padding:10px; border:1px solid #e7eaf0; border-radius:10px; cursor:pointer; background:#fff
-      }
+      .pal-card{display:flex; align-items:center; gap:10px; padding:10px; border:1px solid #e7eaf0; border-radius:10px; cursor:pointer; background:#fff}
       .pal-s{width:18px; height:18px; border-radius:4px; border:1px solid #d0d3da}
       .pal-sw{display:flex; gap:4px}
       .pal-name{font-size:12px; opacity:.8; margin-left:auto}
@@ -48,18 +78,19 @@
     <div class="panel">
 
       <!-- ════════════════════════════════════════
-           SECTION 1 — Connection (existing)
+           SECTION 1 — Connection
            ════════════════════════════════════════ -->
       <div class="section">
         <div class="title">Connection</div>
-        <div class="f keywrap">
+
+        <div class="f keywrap" style="margin-bottom:10px">
           <label>OpenAI API Key</label>
           <input id="apiKey" type="password" placeholder="sk-..." />
           <button class="reveal" id="toggleKey" tabindex="-1">Show</button>
-          <div class="hint">Stored with the story/app (not in code).</div>
+          <div class="hint">Stored with the story — never sent to any third party directly.</div>
         </div>
 
-        <div class="grid" style="margin-top:10px">
+        <div class="grid">
           <div class="f">
             <label>Model</label>
             <select id="model">
@@ -70,7 +101,7 @@
           </div>
           <div class="f">
             <label>Welcome Text</label>
-            <input id="welcomeText" type="text" placeholder="Hello, I'm PerciBot! How can I assist you?" />
+            <input id="welcomeText" type="text" placeholder="Hello, I'm PerciBOT!" />
           </div>
         </div>
       </div>
@@ -78,44 +109,50 @@
       <hr class="divider" />
 
       <!-- ════════════════════════════════════════
-           SECTION 2 — Backend & Prompts (NEW)
+           SECTION 2 — Backend & Prompts
            ════════════════════════════════════════ -->
       <div class="section">
         <div class="title">Backend &amp; Prompts</div>
 
-        <!-- Row 1: Backend URL + Client ID -->
-        <div class="grid" style="margin-bottom:12px">
-          <div class="f">
-            <label>Backend URL</label>
-            <input id="backendUrl" type="text" placeholder="https://your-backend-url.com" />
-            <div class="hint">Base URL of the PerciBOT FastAPI backend.</div>
-            <div class="warn">Ensure CORS is enabled on the backend.</div>
+        <!-- Backend URL row: input + Test Connection button + status chip -->
+        <div class="f" style="margin-bottom:12px">
+          <label>Backend URL</label>
+          <div style="display:flex; gap:8px; align-items:flex-start">
+            <div style="flex:1; display:flex; flex-direction:column; gap:4px">
+              <input id="backendUrl" type="text" placeholder="https://your-backend-url.com" />
+              <div class="hint">Base URL of the PerciBOT FastAPI backend.</div>
+              <div class="warn">\u26a0\ufe0f Ensure CORS is enabled on the backend.</div>
+            </div>
+            <button id="testConnBtn" class="btn-test">Test Connection</button>
           </div>
-          <div class="f">
-            <label>Client ID</label>
-            <input id="clientId" type="text" placeholder="e.g. smartstream, futuroot, demo-finance" />
-            <div class="hint">Identifier for the active client / demo context.</div>
-          </div>
+          <span id="connStatus" class="conn-status"></span>
+        </div>
+
+        <!-- Client ID -->
+        <div class="f" style="margin-bottom:12px">
+          <label>Client ID</label>
+          <input id="clientId" type="text" placeholder="e.g. smartstream, futuroot, demo-finance" />
+          <div class="hint">Identifier for the active client / demo context.</div>
         </div>
 
         <!-- Answer Prompt -->
         <div class="f" style="margin-bottom:12px">
           <label>Answer Prompt</label>
-          <textarea id="answerPrompt" class="prompt" placeholder="Template for L2 answer generation…"></textarea>
+          <textarea id="answerPrompt" class="prompt" placeholder="Template for L2 answer generation\u2026"></textarea>
           <div class="hint">Template for L2 answer generation. No character limit.</div>
         </div>
 
         <!-- Behaviour Prompt -->
         <div class="f" style="margin-bottom:12px">
           <label>Behaviour Prompt</label>
-          <textarea id="behaviourPrompt" class="prompt" placeholder="SQL generation rules and constraints for L1 chain…"></textarea>
+          <textarea id="behaviourPrompt" class="prompt" placeholder="SQL generation rules and constraints for L1 chain\u2026"></textarea>
           <div class="hint">SQL generation rules and constraints for L1 chain.</div>
         </div>
 
         <!-- Schema Prompt -->
         <div class="f">
           <label>Schema Prompt</label>
-          <textarea id="schemaPrompt" class="prompt" placeholder="Active table schema and column definitions…"></textarea>
+          <textarea id="schemaPrompt" class="prompt" placeholder="Active table schema and column definitions\u2026"></textarea>
           <div class="hint">Active table schema and column definitions. May be large.</div>
         </div>
       </div>
@@ -123,41 +160,22 @@
       <hr class="divider" />
 
       <!-- ════════════════════════════════════════
-           SECTION 3 — Behaviour (existing)
-           ════════════════════════════════════════ -->
-      <div class="section">
-        <div class="title">Behavior</div>
-        <div class="f">
-          <label>System Prompt</label>
-          <textarea id="systemPrompt" placeholder="You are PerciBot, a helpful and concise assistant for SAP Analytics Cloud."></textarea>
-        </div>
-      </div>
-
-      <hr class="divider" />
-
-      <!-- ════════════════════════════════════════
-           SECTION 4 — Theme (existing)
+           SECTION 3 — Theme
            ════════════════════════════════════════ -->
       <div class="section">
         <div class="title">Theme</div>
-
-        <!-- Palettes -->
         <div id="palettes" class="palettes" style="margin-bottom:12px"></div>
-
-        <!-- Individual pickers -->
         <div class="grid">
-          <div class="f"><label>Header Gradient Start</label><input id="primaryColor"  type="color" /></div>
-          <div class="f"><label>Header Gradient End</label>  <input id="primaryDark"   type="color" /></div>
-          <div class="f"><label>Background</label>           <input id="surfaceColor"  type="color" /></div>
-          <div class="f"><label>Chat Panel Background</label><input id="surfaceAlt"    type="color" /></div>
-          <div class="f"><label>Text Color</label>           <input id="textColor"     type="color" /></div>
+          <div class="f"><label>Header Gradient Start</label><input id="primaryColor" type="color" /></div>
+          <div class="f"><label>Header Gradient End</label>  <input id="primaryDark"  type="color" /></div>
+          <div class="f"><label>Background</label>           <input id="surfaceColor" type="color" /></div>
+          <div class="f"><label>Chat Panel Background</label><input id="surfaceAlt"   type="color" /></div>
+          <div class="f"><label>Text Color</label>           <input id="textColor"    type="color" /></div>
         </div>
         <div id="themeError" class="danger" style="margin-top:6px; display:none"></div>
       </div>
 
-      <!-- ════════════════════════════════════════
-           TOOLBAR
-           ════════════════════════════════════════ -->
+      <!-- Toolbar -->
       <div class="toolbar">
         <span class="chip" id="statusChip">No changes</span>
         <button id="resetBtn">Reset</button>
@@ -166,234 +184,246 @@
     </div>
 
     <div class="toast" id="toast">Saved</div>
-  `;
+  `
 
-  const HEX = /^#([0-9a-fA-F]{6})$/;
+  const HEX = /^#([0-9a-fA-F]{6})$/
 
   class PerciBotBuilder extends HTMLElement {
-    constructor() {
-      super();
-      this.attachShadow({ mode: 'open' });
-      this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-      this.$ = id => this.shadowRoot.getElementById(id);
+    constructor () {
+      super()
+      this.attachShadow({ mode: 'open' })
+      this.shadowRoot.appendChild(tpl.content.cloneNode(true))
+      this.$ = id => this.shadowRoot.getElementById(id)
 
-      // ── All tracked keys — existing + new ──────────────────────────────────
+      // All tracked property keys — drives dirty tracking, _collect, _apply
       this.keys = [
-        // Existing
-        'apiKey', 'model', 'systemPrompt', 'welcomeText',
+        'apiKey', 'model', 'welcomeText',
         'primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor',
-        // New
         'backendUrl', 'clientId', 'answerPrompt', 'behaviourPrompt', 'schemaPrompt'
-      ];
-
-      this.inputs = this.keys.map(k => this.$(k));
+      ]
+      this.inputs = this.keys.map(k => this.$(k))
 
       // Show / hide API key
       this.$('toggleKey').addEventListener('click', () => {
-        const inp = this.$('apiKey');
-        inp.type = (inp.type === 'password' ? 'text' : 'password');
-        this.$('toggleKey').textContent = inp.type === 'password' ? 'Show' : 'Hide';
-      });
+        const inp = this.$('apiKey')
+        inp.type = inp.type === 'password' ? 'text' : 'password'
+        this.$('toggleKey').textContent = inp.type === 'password' ? 'Show' : 'Hide'
+      })
 
-      // Dirty tracking — wire every input/textarea/select
-      const markDirty = () => this._setDirty(true);
+      // Dirty tracking
+      const markDirty = () => this._setDirty(true)
       this.inputs.forEach(el => {
-        if (!el) return;
-        el.addEventListener('input', markDirty);
-        el.addEventListener('change', markDirty);
-      });
+        if (!el) return
+        el.addEventListener('input', markDirty)
+        el.addEventListener('change', markDirty)
+      })
 
-      // Toolbar actions
-      this.$('resetBtn').addEventListener('click', () => this._reset());
-      this.$('updateBtn').addEventListener('click', () => this._update());
+      // Toolbar
+      this.$('resetBtn').addEventListener('click',  () => this._reset())
+      this.$('updateBtn').addEventListener('click', () => this._update())
 
-      // Colour palettes
+      // Test Connection
+      this.$('testConnBtn').addEventListener('click', () => this._testConnection())
+
+      // Palettes
       this._palettes = [
-        {
-          name: 'SAC Blue',
-          primaryColor: '#1f4fbf', primaryDark: '#163a8a',
-          surfaceColor: '#ffffff', surfaceAlt: '#f6f8ff', textColor: '#0b1221'
-        },
-        {
-          name: 'Emerald',
-          primaryColor: '#0fb37d', primaryDark: '#0a7f59',
-          surfaceColor: '#ffffff', surfaceAlt: '#f2fbf7', textColor: '#0a1b14'
-        },
-        {
-          name: 'Sunset',
-          primaryColor: '#ff8a00', primaryDark: '#e53670',
-          surfaceColor: '#ffffff', surfaceAlt: '#fff8f0', textColor: '#131212'
-        },
-        {
-          name: 'Slate',
-          primaryColor: '#4a5568', primaryDark: '#2d3748',
-          surfaceColor: '#f7f9fc', surfaceAlt: '#eef2f7', textColor: '#0b1221'
-        },
-        {
-          name: 'Indigo',
-          primaryColor: '#5a67d8', primaryDark: '#434190',
-          surfaceColor: '#ffffff', surfaceAlt: '#f3f4ff', textColor: '#0b1221'
-        },
-        {
-          name: 'Carbon',
-          primaryColor: '#2b2b2b', primaryDark: '#0f0f0f',
-          surfaceColor: '#ffffff', surfaceAlt: '#f6f6f6', textColor: '#111111'
-        }
-      ];
-      this._renderPalettes();
+        { name: 'SAC Blue',  primaryColor: '#1f4fbf', primaryDark: '#163a8a', surfaceColor: '#ffffff', surfaceAlt: '#f6f8ff', textColor: '#0b1221' },
+        { name: 'Emerald',   primaryColor: '#0fb37d', primaryDark: '#0a7f59', surfaceColor: '#ffffff', surfaceAlt: '#f2fbf7', textColor: '#0a1b14' },
+        { name: 'Sunset',    primaryColor: '#ff8a00', primaryDark: '#e53670', surfaceColor: '#ffffff', surfaceAlt: '#fff8f0', textColor: '#131212' },
+        { name: 'Slate',     primaryColor: '#4a5568', primaryDark: '#2d3748', surfaceColor: '#f7f9fc', surfaceAlt: '#eef2f7', textColor: '#0b1221' },
+        { name: 'Indigo',    primaryColor: '#5a67d8', primaryDark: '#434190', surfaceColor: '#ffffff', surfaceAlt: '#f3f4ff', textColor: '#0b1221' },
+        { name: 'Carbon',    primaryColor: '#2b2b2b', primaryDark: '#0f0f0f', surfaceColor: '#ffffff', surfaceAlt: '#f6f6f6', textColor: '#111111' },
+      ]
+      this._renderPalettes()
     }
 
-    // ── SAC lifecycle hooks ────────────────────────────────────────────────────
+    // ── SAC lifecycle ──────────────────────────────────────────────────────────
 
-    onCustomWidgetBuilderInit(host) {
-      this._apply((host && host.properties) || {});
-      this._initial = { ...this._props };
+    onCustomWidgetBuilderInit (host) {
+      this._apply((host && host.properties) || {})
+      this._initial = { ...this._props }
     }
 
-    onCustomWidgetAfterUpdate(changedProps) {
-      this._apply(changedProps, /*external*/true);
+    onCustomWidgetAfterUpdate (changedProps) {
+      this._apply(changedProps, true)
     }
 
     // ── Palette rendering ──────────────────────────────────────────────────────
 
-    _renderPalettes() {
-      const root = this.$('palettes');
-      const mk = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
+    _renderPalettes () {
+      const root = this.$('palettes')
+      const mk   = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e }
       this._palettes.forEach(p => {
-        const card = mk('div', 'pal-card');
-        const sw   = mk('div', 'pal-sw');
-        ['primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor'].forEach(k => {
-          const s = mk('div', 'pal-s'); s.style.background = p[k]; sw.appendChild(s);
-        });
-        const name = mk('div', 'pal-name'); name.textContent = p.name;
-        card.appendChild(sw); card.appendChild(name);
+        const card = mk('div', 'pal-card')
+        const sw   = mk('div', 'pal-sw')
+        ;['primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor'].forEach(k => {
+          const s = mk('div', 'pal-s'); s.style.background = p[k]; sw.appendChild(s)
+        })
+        const name = mk('div', 'pal-name'); name.textContent = p.name
+        card.appendChild(sw); card.appendChild(name)
         card.addEventListener('click', () => {
-          Object.entries(p).forEach(([k, v]) => { if (k !== 'name' && this.$(k)) this.$(k).value = v; });
-          this._setDirty(true);
-        });
-        root.appendChild(card);
-      });
+          Object.entries(p).forEach(([k, v]) => { if (k !== 'name' && this.$(k)) this.$(k).value = v })
+          this._setDirty(true)
+        })
+        root.appendChild(card)
+      })
     }
 
     // ── State management ───────────────────────────────────────────────────────
 
-    /**
-     * Apply a property map to internal state and DOM inputs.
-     * @param {object}  p         Property map (may be partial).
-     * @param {boolean} external  When true, skip dirty-flag reset (SAC pushed the change).
-     */
-    _apply(p = {}, external = false) {
+    _apply (p = {}, external = false) {
       this._props = {
-        // Existing properties
         apiKey:          p.apiKey          ?? '',
-        model:           p.model           ?? 'gpt-3.5-turbo',
-        systemPrompt:    p.systemPrompt    ?? 'You are PerciBot, a helpful and concise assistant for SAP Analytics Cloud.',
+        model:           p.model           ?? 'gpt-4o-mini',
         welcomeText:     p.welcomeText     ?? 'Hello, I\u2019m PerciBOT! How can I assist you?',
         primaryColor:    p.primaryColor    ?? '#1f4fbf',
         primaryDark:     p.primaryDark     ?? '#163a8a',
         surfaceColor:    p.surfaceColor    ?? '#ffffff',
         surfaceAlt:      p.surfaceAlt      ?? '#f6f8ff',
         textColor:       p.textColor       ?? '#0b1221',
-        // New properties
         backendUrl:      p.backendUrl      ?? '',
         clientId:        p.clientId        ?? '',
         answerPrompt:    p.answerPrompt    ?? '',
         behaviourPrompt: p.behaviourPrompt ?? '',
         schemaPrompt:    p.schemaPrompt    ?? '',
-      };
-
-      this.keys.forEach(k => { if (this.$(k)) this.$(k).value = this._props[k]; });
-      if (!external) this._setDirty(false);
-      this._validateTheme();
+      }
+      this.keys.forEach(k => { if (this.$(k)) this.$(k).value = this._props[k] })
+      if (!external) this._setDirty(false)
+      this._validateTheme()
     }
 
     // ── Theme validation ───────────────────────────────────────────────────────
 
-    _validateTheme() {
-      const ids  = ['primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor'];
-      const bad  = ids.filter(id => !HEX.test((this.$(id).value || '').trim().toLowerCase()));
-      const err  = this.$('themeError');
-      if (bad.length) {
-        err.textContent  = 'Please choose valid colors.';
-        err.style.display = 'block';
-      } else {
-        err.style.display = 'none';
-      }
-      return bad.length === 0;
+    _validateTheme () {
+      const ids = ['primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor']
+      const bad = ids.filter(id => !HEX.test((this.$(id).value || '').trim().toLowerCase()))
+      const err = this.$('themeError')
+      if (bad.length) { err.textContent = 'Please choose valid colors.'; err.style.display = 'block' }
+      else            { err.style.display = 'none' }
+      return bad.length === 0
     }
 
-    _setDirty(dirty) {
-      this._dirty = !!dirty;
-      this.$('updateBtn').disabled = !this._dirty || !this._validateTheme();
-      this.$('statusChip').textContent = this._dirty ? 'Unsaved changes' : 'No changes';
+    _setDirty (dirty) {
+      this._dirty = !!dirty
+      this.$('updateBtn').disabled = !this._dirty || !this._validateTheme()
+      this.$('statusChip').textContent = this._dirty ? 'Unsaved changes' : 'No changes'
     }
 
     // ── Collect current DOM values ─────────────────────────────────────────────
 
-    _collect() {
-      const get = id => (this.$(id) ? this.$(id).value : '');
+    _collect () {
+      const get = id => (this.$(id) ? this.$(id).value : '')
       return {
-        // Existing
         apiKey:          get('apiKey'),
         model:           get('model'),
-        systemPrompt:    get('systemPrompt'),
         welcomeText:     get('welcomeText'),
         primaryColor:    get('primaryColor'),
         primaryDark:     get('primaryDark'),
         surfaceColor:    get('surfaceColor'),
         surfaceAlt:      get('surfaceAlt'),
         textColor:       get('textColor'),
-        // New — no trimming on prompts; preserve whitespace as authored
         backendUrl:      get('backendUrl').trim(),
         clientId:        get('clientId').trim(),
         answerPrompt:    get('answerPrompt'),
         behaviourPrompt: get('behaviourPrompt'),
         schemaPrompt:    get('schemaPrompt'),
-      };
+      }
+    }
+
+    // ── Test Connection ────────────────────────────────────────────────────────
+
+    /**
+     * Encrypts the current API key and POSTs to /presales/test-connection.
+     * Shows an inline status indicator — green on success, red on failure.
+     * Does NOT require the Update button to have been clicked first.
+     */
+    async _testConnection () {
+      const backendUrl = (this.$('backendUrl').value || '').trim().replace(/\/$/, '')
+      const apiKey     = (this.$('apiKey').value     || '').trim()
+      const model      = (this.$('model').value      || '').trim()
+      const status     = this.$('connStatus')
+
+      if (!backendUrl) {
+        status.className = 'conn-status err'
+        status.textContent = '\u2717 Backend URL is empty'
+        return
+      }
+      if (!apiKey) {
+        status.className = 'conn-status err'
+        status.textContent = '\u2717 API key is empty'
+        return
+      }
+
+      status.className   = 'conn-status checking'
+      status.textContent = '\u29d7 Checking\u2026'
+      this.$('testConnBtn').disabled = true
+
+      try {
+        const res = await fetch(`${backendUrl}/presales/test-connection`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            api_key_encrypted: xorEncrypt(apiKey),
+            model,
+          }),
+        })
+
+        const data = await res.json()
+
+        if (data.status === 'ok') {
+          status.className   = 'conn-status ok'
+          status.textContent = `\u2713 Connected \u2014 ${data.model}`
+        } else {
+          status.className   = 'conn-status err'
+          status.textContent = `\u2717 ${data.detail || 'Connection failed'}`
+        }
+      } catch (e) {
+        status.className   = 'conn-status err'
+        status.textContent = `\u2717 ${e.message}`
+      } finally {
+        this.$('testConnBtn').disabled = false
+      }
     }
 
     // ── Toolbar actions ────────────────────────────────────────────────────────
 
-    _update() {
-      if (!this._validateTheme()) return;
-      const props = this._collect();
+    _update () {
+      if (!this._validateTheme()) return
+      const props = this._collect()
 
-      // Fire propertiesChanged so SAC propagates to the live widget immediately.
-      const evt = new CustomEvent('propertiesChanged', {
+      this.dispatchEvent(new CustomEvent('propertiesChanged', {
         detail:   { properties: props },
         bubbles:  true,
         composed: true,
-      });
-      this.dispatchEvent(evt);
+      }))
 
-      this._props   = { ...props };
-      this._initial = { ...props };
-      this._setDirty(false);
-      this._toast('Saved');
+      this._props   = { ...props }
+      this._initial = { ...props }
+      this._setDirty(false)
+      this._toast('Saved')
     }
 
-    _reset() {
-      this._apply(this._initial);
-      const evt = new CustomEvent('propertiesChanged', {
+    _reset () {
+      this._apply(this._initial)
+      this.dispatchEvent(new CustomEvent('propertiesChanged', {
         detail:   { properties: { ...this._initial } },
         bubbles:  true,
         composed: true,
-      });
-      this.dispatchEvent(evt);
-      this._setDirty(false);
+      }))
+      this._setDirty(false)
     }
 
-    // ── Toast notification ─────────────────────────────────────────────────────
+    // ── Toast ──────────────────────────────────────────────────────────────────
 
-    _toast(msg) {
-      const t = this.$('toast');
-      t.textContent = msg;
-      t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 1200);
+    _toast (msg) {
+      const t = this.$('toast')
+      t.textContent = msg
+      t.classList.add('show')
+      setTimeout(() => t.classList.remove('show'), 1200)
     }
   }
 
   if (!customElements.get('perci-bot-builder')) {
-    customElements.define('perci-bot-builder', PerciBotBuilder);
+    customElements.define('perci-bot-builder', PerciBotBuilder)
   }
-})();
+})()

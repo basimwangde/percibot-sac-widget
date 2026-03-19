@@ -3,7 +3,7 @@
   "license": "",
   "vendor": "Percipere Consulting",
   "id": "com.percipere.sac.percibot.presales",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "PerciBOT_Presales",
   "newInstancePrefix": "PerciBOT_Presales",
   "description": "Conversational AI assistant for SAP Analytics Cloud powered by PerciBOT backend",
@@ -29,10 +29,10 @@
     "height":       { "type": "integer", "default": 1 },
 
     "apiKey":       { "type": "string",  "default": "" },
-    "model":        { "type": "string",  "default": "gpt-3.5-turbo" },
+    "model":        { "type": "string",  "default": "gpt-4o-mini" },
 
-    "systemPrompt": { "type": "string",  "default": "You are PerciBot, a helpful and concise assistant for SAP Analytics Cloud." },
-    "welcomeText":  { "type": "string",  "default": "Hello, I'm PerciBot! How can I assist you today?" },
+    "systemPrompt": { "type": "string",  "default": "" },
+    "welcomeText":  { "type": "string",  "default": "Hello, I'm PerciBOT! How can I assist you today?" },
 
     "primaryColor": { "type": "string",  "default": "#1f4fbf" },
     "primaryDark":  { "type": "string",  "default": "#163a8a" },
@@ -41,8 +41,6 @@
     "surfaceAlt":   { "type": "string",  "default": "#f6f8ff" },
     "textColor":    { "type": "string",  "default": "#0b1221" },
     "datasets":     { "type": "string",  "default": "" },
-    "summaryResponse": { "type": "string", "default": "" },
-    "summaryPrompt":   { "type": "string", "default": "" },
 
     "backendUrl":       { "type": "string", "default": "" },
     "answerPrompt":     { "type": "string", "default": "" },
@@ -62,22 +60,6 @@
         }
       ],
       "body": "this.datasets = payload;"
-    },
-    "generateSummary": {
-      "description": "Generate a summary of the datasets.",
-      "parameters": [
-        {
-          "name": "payload",
-          "type": "string",
-          "description": "Prompt to guide the summary generation."
-        }
-      ],
-      "body": "this.summaryPrompt = payload;"
-    },
-    "getLastSummary": {
-      "description": "Return the last generated summary string.",
-      "parameters": [],
-      "returnType": "string"
     }
   },
   "events": {}
