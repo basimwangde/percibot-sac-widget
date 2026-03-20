@@ -1,8 +1,15 @@
 /* PerciBot — Builder Panel
-   Sections: Connection | Backend & Prompts | Theme
+   Sections: Connection | Prompts | Theme
    Test Connection checks both OpenAI API and HANA view existence.
 */
 (function () {
+
+  /**
+   * PerciBOT backend endpoint.
+   * To redirect the widget to a different deployment, update this value.
+   */
+  const BACKEND_URL = 'https://percibot.cfapps.us10-001.hana.ondemand.com'
+
   const CRYPTO_KEY = 'percibot-default-key'
 
   function xorEncrypt (plaintext) {
@@ -30,25 +37,23 @@
         width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--sapList_BorderColor,#d0d3da);
         border-radius:8px; background:#fff; outline:none;
       }
-      input[type="color"]{ padding:6px; height:40px }
       input:focus, select:focus, textarea:focus{border-color:#4d9aff; box-shadow:0 0 0 2px rgba(77,154,255,.15)}
+      input[type="color"]{ padding:6px; height:40px }
       textarea{resize:vertical}
       textarea.prompt{min-height:120px}
       .hint{font-size:12px; opacity:.65}
-      .warn{font-size:12px; color:#b45309}
       .toolbar{display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:16px; padding-top:12px; border-top:1px solid #e7eaf0}
       button{ padding:10px 14px; border:1px solid #d0d3da; border-radius:10px; background:#fff; cursor:pointer; font-size:13px }
       button[disabled]{opacity:.5; cursor:not-allowed}
       .primary{ background:#1f4fbf; color:#fff; border-color:#1f4fbf }
-      .btn-test{ padding:8px 12px; font-size:12px; border-radius:8px; white-space:nowrap }
+      .btn-test{ padding:8px 12px; font-size:12px; border-radius:8px; white-space:nowrap; align-self:flex-start }
       .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#f5f7fb; border:1px solid #e7eaf0; font-size:12px}
       .keywrap{position:relative}
       .reveal{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:transparent; border:none; cursor:pointer; opacity:.7; font-size:12px; padding:4px }
       .conn-status{ font-size:12px; font-weight:600; padding:4px 8px; border-radius:6px; display:none }
-      .conn-status.ok    { display:inline-block; background:#d1fae5; color:#065f46 }
-      .conn-status.err   { display:inline-block; background:#fee2e2; color:#991b1b }
+      .conn-status.ok       { display:inline-block; background:#d1fae5; color:#065f46 }
+      .conn-status.err      { display:inline-block; background:#fee2e2; color:#991b1b }
       .conn-status.checking { display:inline-block; background:#fef3c7; color:#92400e }
-      /* Multi-line connection result panel */
       .conn-detail{
         display:none; margin-top:8px; padding:10px 12px;
         border:1px solid #e7eaf0; border-radius:8px; background:#f9fafb;
@@ -78,18 +83,22 @@
 
     <div class="panel">
 
-      <!-- SECTION 1 — Connection -->
+      <!-- ════════════════════════════════════════
+           SECTION 1 — Connection
+           ════════════════════════════════════════ -->
       <div class="section">
         <div class="title">Connection</div>
 
-        <div class="f keywrap" style="margin-bottom:10px">
+        <!-- API Key -->
+        <div class="f keywrap" style="margin-bottom:12px">
           <label>OpenAI API Key</label>
           <input id="apiKey" type="password" placeholder="sk-..." />
           <button class="reveal" id="toggleKey" tabindex="-1">Show</button>
           <div class="hint">Stored with the story — never sent to any third party directly.</div>
         </div>
 
-        <div class="grid">
+        <!-- Model + Welcome Text -->
+        <div class="grid" style="margin-bottom:12px">
           <div class="f">
             <label>Model</label>
             <select id="model">
@@ -103,50 +112,8 @@
             <input id="welcomeText" type="text" placeholder="Hello, I'm PerciBOT!" />
           </div>
         </div>
-      </div>
 
-      <hr class="divider" />
-
-      <!-- SECTION 2 — Backend & Prompts -->
-      <div class="section">
-        <div class="title">Backend &amp; Prompts</div>
-
-        <!-- Backend URL -->
-        <div class="f" style="margin-bottom:12px">
-          <label>Backend URL</label>
-          <div style="display:flex; gap:8px; align-items:flex-start">
-            <div style="flex:1; display:flex; flex-direction:column; gap:4px">
-              <input id="backendUrl" type="text" placeholder="https://your-backend-url.com" />
-              <div class="hint">Base URL of the PerciBOT FastAPI backend.</div>
-              <div class="warn">&#9888;&#65039; Ensure CORS is enabled on the backend.</div>
-            </div>
-            <button id="testConnBtn" class="btn-test">Test Connection</button>
-          </div>
-
-          <!-- Inline status badge -->
-          <span id="connStatus" class="conn-status"></span>
-
-          <!-- Expanded result panel — shows OpenAI + HANA rows -->
-          <div id="connDetail" class="conn-detail">
-            <div class="row">
-              <span class="lbl">OpenAI</span>
-              <span id="cdOpenai" class="ok-val"></span>
-            </div>
-            <div class="row">
-              <span class="lbl">HANA</span>
-              <span id="cdHana" class="ok-val"></span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Client ID -->
-        <div class="f" style="margin-bottom:12px">
-          <label>Client ID</label>
-          <input id="clientId" type="text" placeholder="e.g. smartstream, futuroot, demo-finance" />
-          <div class="hint">Identifier for the active client / demo context.</div>
-        </div>
-
-        <!-- Schema Name + View Name (for HANA view test) -->
+        <!-- Schema Name + View Name -->
         <div class="grid" style="margin-bottom:12px">
           <div class="f">
             <label>Schema Name</label>
@@ -156,8 +123,40 @@
           <div class="f">
             <label>View Name</label>
             <input id="viewName" type="text" placeholder="e.g. VW_FINANCIAL_DATA" />
-            <div class="hint">View name to validate in Test Connection.</div>
+            <div class="hint">View to validate on Test Connection.</div>
           </div>
+        </div>
+
+        <!-- Test Connection -->
+        <div class="f">
+          <button id="testConnBtn" class="btn-test">Test Connection</button>
+          <span id="connStatus" class="conn-status"></span>
+          <div id="connDetail" class="conn-detail">
+            <div class="row">
+              <span class="lbl">OpenAI</span>
+              <span id="cdOpenai"></span>
+            </div>
+            <div class="row">
+              <span class="lbl">HANA</span>
+              <span id="cdHana"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- ════════════════════════════════════════
+           SECTION 2 — Prompts
+           ════════════════════════════════════════ -->
+      <div class="section">
+        <div class="title">Prompts</div>
+
+        <!-- Client ID -->
+        <div class="f" style="margin-bottom:12px">
+          <label>Client ID</label>
+          <input id="clientId" type="text" placeholder="e.g. smartstream, futuroot, demo-finance" />
+          <div class="hint">Identifier for the active client / demo context.</div>
         </div>
 
         <!-- Answer Prompt -->
@@ -184,7 +183,9 @@
 
       <hr class="divider" />
 
-      <!-- SECTION 3 — Theme -->
+      <!-- ════════════════════════════════════════
+           SECTION 3 — Theme
+           ════════════════════════════════════════ -->
       <div class="section">
         <div class="title">Theme</div>
         <div id="palettes" class="palettes" style="margin-bottom:12px"></div>
@@ -218,11 +219,12 @@
       this.shadowRoot.appendChild(tpl.content.cloneNode(true))
       this.$ = id => this.shadowRoot.getElementById(id)
 
+      // backendUrl is intentionally excluded — it is hardcoded as BACKEND_URL
       this.keys = [
         'apiKey', 'model', 'welcomeText',
+        'schemaName', 'viewName',
         'primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor',
-        'backendUrl', 'clientId', 'schemaName', 'viewName',
-        'answerPrompt', 'behaviourPrompt', 'schemaPrompt',
+        'clientId', 'answerPrompt', 'behaviourPrompt', 'schemaPrompt',
       ]
       this.inputs = this.keys.map(k => this.$(k))
 
@@ -287,15 +289,14 @@
         apiKey:          p.apiKey          ?? '',
         model:           p.model           ?? 'gpt-4o-mini',
         welcomeText:     p.welcomeText     ?? 'Hello, I\u2019m PerciBOT! How can I assist you?',
+        schemaName:      p.schemaName      ?? '',
+        viewName:        p.viewName        ?? '',
         primaryColor:    p.primaryColor    ?? '#1f4fbf',
         primaryDark:     p.primaryDark     ?? '#163a8a',
         surfaceColor:    p.surfaceColor    ?? '#ffffff',
         surfaceAlt:      p.surfaceAlt      ?? '#f6f8ff',
         textColor:       p.textColor       ?? '#0b1221',
-        backendUrl:      p.backendUrl      ?? '',
         clientId:        p.clientId        ?? '',
-        schemaName:      p.schemaName      ?? '',
-        viewName:        p.viewName        ?? '',
         answerPrompt:    p.answerPrompt    ?? '',
         behaviourPrompt: p.behaviourPrompt ?? '',
         schemaPrompt:    p.schemaPrompt    ?? '',
@@ -326,31 +327,21 @@
         apiKey:          get('apiKey'),
         model:           get('model'),
         welcomeText:     get('welcomeText'),
+        schemaName:      get('schemaName').trim(),
+        viewName:        get('viewName').trim(),
         primaryColor:    get('primaryColor'),
         primaryDark:     get('primaryDark'),
         surfaceColor:    get('surfaceColor'),
         surfaceAlt:      get('surfaceAlt'),
         textColor:       get('textColor'),
-        backendUrl:      get('backendUrl').trim(),
         clientId:        get('clientId').trim(),
-        schemaName:      get('schemaName').trim(),
-        viewName:        get('viewName').trim(),
         answerPrompt:    get('answerPrompt'),
         behaviourPrompt: get('behaviourPrompt'),
         schemaPrompt:    get('schemaPrompt'),
       }
     }
 
-    /**
-     * Test Connection — two-step check:
-     *   Step 1: POST to /presales/test-connection with encrypted API key + model.
-     *   Step 2: Backend also validates the HANA view if schemaName + viewName are set.
-     *
-     * The result panel shows individual OpenAI and HANA status rows so the
-     * consultant can see exactly which step passed or failed.
-     */
     async _testConnection () {
-      const backendUrl = (this.$('backendUrl').value || '').trim().replace(/\/$/, '')
       const apiKey     = (this.$('apiKey').value     || '').trim()
       const model      = (this.$('model').value      || '').trim()
       const schemaName = (this.$('schemaName').value || '').trim()
@@ -361,16 +352,10 @@
       const openaiEl = this.$('cdOpenai')
       const hanaEl   = this.$('cdHana')
 
-      // Reset detail panel
       detailEl.classList.remove('show')
       openaiEl.className = ''; openaiEl.textContent = ''
       hanaEl.className   = ''; hanaEl.textContent   = ''
 
-      if (!backendUrl) {
-        statusEl.className   = 'conn-status err'
-        statusEl.textContent = '\u2717 Backend URL is empty'
-        return
-      }
       if (!apiKey) {
         statusEl.className   = 'conn-status err'
         statusEl.textContent = '\u2717 API key is empty'
@@ -382,24 +367,19 @@
       this.$('testConnBtn').disabled = true
 
       try {
-        const body = {
-          api_key_encrypted: xorEncrypt(apiKey),
-          model,
-        }
-        // Only include schema/view when both are provided
+        const body = { api_key_encrypted: xorEncrypt(apiKey), model }
         if (schemaName && viewName) {
           body.schema_name = schemaName
           body.view_name   = viewName
         }
 
-        const res  = await fetch(`${backendUrl}/presales/test-connection`, {
+        const res  = await fetch(`${BACKEND_URL}/presales/test-connection`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify(body),
         })
         const data = await res.json()
 
-        // Populate detail rows
         detailEl.classList.add('show')
 
         if (data.openai === 'ok') {
@@ -412,7 +392,7 @@
 
         if (!schemaName || !viewName) {
           hanaEl.className   = 'skip-val'
-          hanaEl.textContent = 'Skipped — no schema/view configured'
+          hanaEl.textContent = 'Skipped \u2014 no schema/view configured'
         } else if (data.hana === 'ok') {
           hanaEl.className   = 'ok-val'
           hanaEl.textContent = `\u2713 View found: ${schemaName}.${viewName}`
@@ -424,13 +404,8 @@
           hanaEl.textContent = 'Skipped'
         }
 
-        if (data.status === 'ok') {
-          statusEl.className   = 'conn-status ok'
-          statusEl.textContent = '\u2713 All checks passed'
-        } else {
-          statusEl.className   = 'conn-status err'
-          statusEl.textContent = '\u2717 One or more checks failed'
-        }
+        statusEl.className   = data.status === 'ok' ? 'conn-status ok'  : 'conn-status err'
+        statusEl.textContent = data.status === 'ok' ? '\u2713 All checks passed' : '\u2717 One or more checks failed'
 
       } catch (e) {
         statusEl.className   = 'conn-status err'

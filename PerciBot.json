@@ -7,7 +7,6 @@
   "name": "PerciBOT_Presales",
   "newInstancePrefix": "PerciBOT_Presales",
   "description": "Conversational AI assistant for SAP Analytics Cloud powered by PerciBOT backend",
-
   "webcomponents": [
     {
       "kind": "main",
@@ -25,33 +24,83 @@
     }
   ],
   "properties": {
-    "width":        { "type": "integer", "default": 1 },
-    "height":       { "type": "integer", "default": 1 },
-
-    "apiKey":       { "type": "string",  "default": "" },
-    "model":        { "type": "string",  "default": "gpt-4o-mini" },
-
-    "systemPrompt": { "type": "string",  "default": "" },
-    "welcomeText":  { "type": "string",  "default": "Hello, I'm PerciBOT! How can I assist you today?" },
-
-    "primaryColor": { "type": "string",  "default": "#1f4fbf" },
-    "primaryDark":  { "type": "string",  "default": "#163a8a" },
-    "accentColor":  { "type": "string",  "default": "#3cc0ff" },
-    "surfaceColor": { "type": "string",  "default": "#ffffff" },
-    "surfaceAlt":   { "type": "string",  "default": "#f6f8ff" },
-    "textColor":    { "type": "string",  "default": "#0b1221" },
-    "datasets":     { "type": "string",  "default": "" },
-
-    "backendUrl":       { "type": "string", "default": "" },
-    "answerPrompt":     { "type": "string", "default": "" },
-    "behaviourPrompt":  { "type": "string", "default": "" },
-    "schemaPrompt":     { "type": "string", "default": "" },
-    "clientId":         { "type": "string", "default": "" },
-
-    "schemaName":   { "type": "string", "default": "" },
-    "viewName":     { "type": "string", "default": "" }
+    "width": {
+      "type": "integer",
+      "default": 1
+    },
+    "height": {
+      "type": "integer",
+      "default": 1
+    },
+    "apiKey": {
+      "type": "string",
+      "default": ""
+    },
+    "model": {
+      "type": "string",
+      "default": "gpt-4o-mini"
+    },
+    "systemPrompt": {
+      "type": "string",
+      "default": ""
+    },
+    "welcomeText": {
+      "type": "string",
+      "default": "Hello, I'm PerciBOT! How can I assist you today?"
+    },
+    "primaryColor": {
+      "type": "string",
+      "default": "#1f4fbf"
+    },
+    "primaryDark": {
+      "type": "string",
+      "default": "#163a8a"
+    },
+    "accentColor": {
+      "type": "string",
+      "default": "#3cc0ff"
+    },
+    "surfaceColor": {
+      "type": "string",
+      "default": "#ffffff"
+    },
+    "surfaceAlt": {
+      "type": "string",
+      "default": "#f6f8ff"
+    },
+    "textColor": {
+      "type": "string",
+      "default": "#0b1221"
+    },
+    "datasets": {
+      "type": "string",
+      "default": ""
+    },
+    "answerPrompt": {
+      "type": "string",
+      "default": ""
+    },
+    "behaviourPrompt": {
+      "type": "string",
+      "default": ""
+    },
+    "schemaPrompt": {
+      "type": "string",
+      "default": ""
+    },
+    "clientId": {
+      "type": "string",
+      "default": ""
+    },
+    "schemaName": {
+      "type": "string",
+      "default": ""
+    },
+    "viewName": {
+      "type": "string",
+      "default": ""
+    }
   },
-
   "methods": {
     "setDatasets": {
       "description": "Attach datasets (JSON string with { name:{schema,types,rows2D}... }).",

@@ -5,6 +5,12 @@
 */
 ;(function () {
 
+  /**
+   * PerciBOT backend endpoint.
+   * To redirect the widget to a different deployment, update this value.
+   */
+  const BACKEND_URL = 'https://percibot.cfapps.us10-001.hana.ondemand.com'
+
   const CRYPTO_KEY = 'percibot-default-key'
 
   function xorEncrypt (plaintext) {
@@ -101,7 +107,7 @@
       </div>
 
       <div class="footer">
-        <div class="muted" id="hint"></div>
+        <div class="muted" id="hint">AI can make mistakes. Please verify results.</div>
         <div class="muted"><a href="https://www.linkedin.com/company/percipere/" target="_blank">Percipere Consulting</a></div>
       </div>
     </div>
@@ -119,11 +125,11 @@
       this.$send      = this.$('send')
       this.$clear     = this.$('clear')
       this.$modelChip = this.$('modelChip')
-      this.$hint      = this.$('hint')
 
       this.$send.addEventListener('click',  () => this._send())
       this.$clear.addEventListener('click', () => (this.$chat.innerHTML = ''))
 
+      // backendUrl intentionally absent — hardcoded as BACKEND_URL
       this._props = {
         apiKey:          '',
         model:           'gpt-4o-mini',
@@ -134,7 +140,6 @@
         surfaceColor:    '#ffffff',
         surfaceAlt:      '#f6f8ff',
         textColor:       '#0b1221',
-        backendUrl:      '',
         answerPrompt:    '',
         behaviourPrompt: '',
         schemaPrompt:    '',
@@ -165,10 +170,6 @@
     onCustomWidgetAfterUpdate (changedProps = {}) {
       Object.assign(this._props, changedProps)
       this._applyTheme()
-
-      this.$hint.textContent = this._props.backendUrl
-        ? 'AI can make mistakes. Please verify results.'
-        : 'Backend URL not set \u2013 open Builder to configure'
 
       if (typeof changedProps.datasets === 'string') {
         this._parseAndApplyDatasets(changedProps.datasets)
@@ -226,23 +227,12 @@
       }).join('') || '<div class="ds">No datasets</div>'
     }
 
-    /**
-     * POST to /presales/ask.
-     * Includes schema_name and view_name when configured so the pipeline
-     * can abort early if the target view is not found.
-     */
     async _send () {
       const q = (this.$input.value || '').trim()
       if (!q) return
 
       this._append('user', q)
       this.$input.value = ''
-
-      const backendUrl = (this._props.backendUrl || '').trim().replace(/\/$/, '')
-      if (!backendUrl) {
-        this._append('bot', '\u26a0\ufe0f Backend URL not configured. Open the Builder panel.')
-        return
-      }
 
       const apiKey = (this._props.apiKey || '').trim()
       if (!apiKey) {
@@ -265,7 +255,6 @@
           model:             this._props.model           || 'gpt-4o-mini',
         }
 
-        // Include view identifiers only when both are configured
         const schemaName = (this._props.schemaName || '').trim()
         const viewName   = (this._props.viewName   || '').trim()
         if (schemaName && viewName) {
@@ -273,7 +262,7 @@
           payload.view_name   = viewName
         }
 
-        const res = await fetch(`${backendUrl}/presales/ask`, {
+        const res = await fetch(`${BACKEND_URL}/presales/ask`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify(payload),
