@@ -1,15 +1,8 @@
 /* PerciBot — Builder Panel
    Sections: Connection | Backend & Prompts | Theme
-   Test Connection fires on button click, encrypts the API key with XOR+Base64
-   matching the backend's simple_crypto.py, and shows an inline status indicator.
+   Test Connection checks both OpenAI API and HANA view existence.
 */
 (function () {
-  // ---------------------------------------------------------------------------
-  // XOR + URL-safe Base64 encryption
-  // Must match utilities/simple_crypto.py on the backend.
-  // Key must equal the PERCIBOT_CRYPTO_KEY environment variable on the server.
-  // WARNING: This is obfuscation only, not cryptographic security.
-  // ---------------------------------------------------------------------------
   const CRYPTO_KEY = 'percibot-default-key'
 
   function xorEncrypt (plaintext) {
@@ -17,16 +10,12 @@
     const ptB   = enc.encode(plaintext)
     const keyB  = enc.encode(CRYPTO_KEY)
     const xored = ptB.map((b, i) => b ^ keyB[i % keyB.length])
-    // URL-safe base64, no padding — mirrors Python urlsafe_b64encode().rstrip(b'=')
     return btoa(String.fromCharCode(...xored))
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=/g, '')
   }
 
-  // ---------------------------------------------------------------------------
-  // Template
-  // ---------------------------------------------------------------------------
   const tpl = document.createElement('template')
   tpl.innerHTML = `
     <style>
@@ -55,11 +44,22 @@
       .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#f5f7fb; border:1px solid #e7eaf0; font-size:12px}
       .keywrap{position:relative}
       .reveal{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:transparent; border:none; cursor:pointer; opacity:.7; font-size:12px; padding:4px }
-      .danger{color:#b00020; font-size:12px}
       .conn-status{ font-size:12px; font-weight:600; padding:4px 8px; border-radius:6px; display:none }
-      .conn-status.ok  { display:inline-block; background:#d1fae5; color:#065f46 }
-      .conn-status.err { display:inline-block; background:#fee2e2; color:#991b1b }
+      .conn-status.ok    { display:inline-block; background:#d1fae5; color:#065f46 }
+      .conn-status.err   { display:inline-block; background:#fee2e2; color:#991b1b }
       .conn-status.checking { display:inline-block; background:#fef3c7; color:#92400e }
+      /* Multi-line connection result panel */
+      .conn-detail{
+        display:none; margin-top:8px; padding:10px 12px;
+        border:1px solid #e7eaf0; border-radius:8px; background:#f9fafb;
+        font-size:12px; line-height:1.6;
+      }
+      .conn-detail.show{ display:block }
+      .conn-detail .row{ display:flex; gap:6px; align-items:flex-start }
+      .conn-detail .lbl{ font-weight:700; min-width:60px }
+      .conn-detail .ok-val  { color:#065f46 }
+      .conn-detail .err-val { color:#991b1b }
+      .conn-detail .skip-val{ color:#6b7280 }
       .palettes{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
       .pal-card{display:flex; align-items:center; gap:10px; padding:10px; border:1px solid #e7eaf0; border-radius:10px; cursor:pointer; background:#fff}
       .pal-s{width:18px; height:18px; border-radius:4px; border:1px solid #d0d3da}
@@ -73,13 +73,12 @@
       }
       .toast.show{opacity:1; transform:translateY(0)}
       .divider{border:none; border-top:1px solid #e7eaf0; margin:18px 0}
+      .danger{color:#b00020; font-size:12px}
     </style>
 
     <div class="panel">
 
-      <!-- ════════════════════════════════════════
-           SECTION 1 — Connection
-           ════════════════════════════════════════ -->
+      <!-- SECTION 1 — Connection -->
       <div class="section">
         <div class="title">Connection</div>
 
@@ -108,24 +107,36 @@
 
       <hr class="divider" />
 
-      <!-- ════════════════════════════════════════
-           SECTION 2 — Backend & Prompts
-           ════════════════════════════════════════ -->
+      <!-- SECTION 2 — Backend & Prompts -->
       <div class="section">
         <div class="title">Backend &amp; Prompts</div>
 
-        <!-- Backend URL row: input + Test Connection button + status chip -->
+        <!-- Backend URL -->
         <div class="f" style="margin-bottom:12px">
           <label>Backend URL</label>
           <div style="display:flex; gap:8px; align-items:flex-start">
             <div style="flex:1; display:flex; flex-direction:column; gap:4px">
               <input id="backendUrl" type="text" placeholder="https://your-backend-url.com" />
               <div class="hint">Base URL of the PerciBOT FastAPI backend.</div>
-              <div class="warn">\u26a0\ufe0f Ensure CORS is enabled on the backend.</div>
+              <div class="warn">&#9888;&#65039; Ensure CORS is enabled on the backend.</div>
             </div>
             <button id="testConnBtn" class="btn-test">Test Connection</button>
           </div>
+
+          <!-- Inline status badge -->
           <span id="connStatus" class="conn-status"></span>
+
+          <!-- Expanded result panel — shows OpenAI + HANA rows -->
+          <div id="connDetail" class="conn-detail">
+            <div class="row">
+              <span class="lbl">OpenAI</span>
+              <span id="cdOpenai" class="ok-val"></span>
+            </div>
+            <div class="row">
+              <span class="lbl">HANA</span>
+              <span id="cdHana" class="ok-val"></span>
+            </div>
+          </div>
         </div>
 
         <!-- Client ID -->
@@ -135,33 +146,45 @@
           <div class="hint">Identifier for the active client / demo context.</div>
         </div>
 
+        <!-- Schema Name + View Name (for HANA view test) -->
+        <div class="grid" style="margin-bottom:12px">
+          <div class="f">
+            <label>Schema Name</label>
+            <input id="schemaName" type="text" placeholder="e.g. DEMO" />
+            <div class="hint">HANA schema containing the target view.</div>
+          </div>
+          <div class="f">
+            <label>View Name</label>
+            <input id="viewName" type="text" placeholder="e.g. VW_FINANCIAL_DATA" />
+            <div class="hint">View name to validate in Test Connection.</div>
+          </div>
+        </div>
+
         <!-- Answer Prompt -->
         <div class="f" style="margin-bottom:12px">
           <label>Answer Prompt</label>
-          <textarea id="answerPrompt" class="prompt" placeholder="Template for L2 answer generation\u2026"></textarea>
+          <textarea id="answerPrompt" class="prompt" placeholder="Template for L2 answer generation&#8230;"></textarea>
           <div class="hint">Template for L2 answer generation. No character limit.</div>
         </div>
 
         <!-- Behaviour Prompt -->
         <div class="f" style="margin-bottom:12px">
           <label>Behaviour Prompt</label>
-          <textarea id="behaviourPrompt" class="prompt" placeholder="SQL generation rules and constraints for L1 chain\u2026"></textarea>
+          <textarea id="behaviourPrompt" class="prompt" placeholder="SQL generation rules and constraints for L1 chain&#8230;"></textarea>
           <div class="hint">SQL generation rules and constraints for L1 chain.</div>
         </div>
 
         <!-- Schema Prompt -->
         <div class="f">
           <label>Schema Prompt</label>
-          <textarea id="schemaPrompt" class="prompt" placeholder="Active table schema and column definitions\u2026"></textarea>
+          <textarea id="schemaPrompt" class="prompt" placeholder="Active table schema and column definitions&#8230;"></textarea>
           <div class="hint">Active table schema and column definitions. May be large.</div>
         </div>
       </div>
 
       <hr class="divider" />
 
-      <!-- ════════════════════════════════════════
-           SECTION 3 — Theme
-           ════════════════════════════════════════ -->
+      <!-- SECTION 3 — Theme -->
       <div class="section">
         <div class="title">Theme</div>
         <div id="palettes" class="palettes" style="margin-bottom:12px"></div>
@@ -195,37 +218,31 @@
       this.shadowRoot.appendChild(tpl.content.cloneNode(true))
       this.$ = id => this.shadowRoot.getElementById(id)
 
-      // All tracked property keys — drives dirty tracking, _collect, _apply
       this.keys = [
         'apiKey', 'model', 'welcomeText',
         'primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor',
-        'backendUrl', 'clientId', 'answerPrompt', 'behaviourPrompt', 'schemaPrompt'
+        'backendUrl', 'clientId', 'schemaName', 'viewName',
+        'answerPrompt', 'behaviourPrompt', 'schemaPrompt',
       ]
       this.inputs = this.keys.map(k => this.$(k))
 
-      // Show / hide API key
       this.$('toggleKey').addEventListener('click', () => {
         const inp = this.$('apiKey')
         inp.type = inp.type === 'password' ? 'text' : 'password'
         this.$('toggleKey').textContent = inp.type === 'password' ? 'Show' : 'Hide'
       })
 
-      // Dirty tracking
       const markDirty = () => this._setDirty(true)
       this.inputs.forEach(el => {
         if (!el) return
-        el.addEventListener('input', markDirty)
+        el.addEventListener('input',  markDirty)
         el.addEventListener('change', markDirty)
       })
 
-      // Toolbar
-      this.$('resetBtn').addEventListener('click',  () => this._reset())
-      this.$('updateBtn').addEventListener('click', () => this._update())
-
-      // Test Connection
+      this.$('resetBtn').addEventListener('click',    () => this._reset())
+      this.$('updateBtn').addEventListener('click',   () => this._update())
       this.$('testConnBtn').addEventListener('click', () => this._testConnection())
 
-      // Palettes
       this._palettes = [
         { name: 'SAC Blue',  primaryColor: '#1f4fbf', primaryDark: '#163a8a', surfaceColor: '#ffffff', surfaceAlt: '#f6f8ff', textColor: '#0b1221' },
         { name: 'Emerald',   primaryColor: '#0fb37d', primaryDark: '#0a7f59', surfaceColor: '#ffffff', surfaceAlt: '#f2fbf7', textColor: '#0a1b14' },
@@ -237,8 +254,6 @@
       this._renderPalettes()
     }
 
-    // ── SAC lifecycle ──────────────────────────────────────────────────────────
-
     onCustomWidgetBuilderInit (host) {
       this._apply((host && host.properties) || {})
       this._initial = { ...this._props }
@@ -247,8 +262,6 @@
     onCustomWidgetAfterUpdate (changedProps) {
       this._apply(changedProps, true)
     }
-
-    // ── Palette rendering ──────────────────────────────────────────────────────
 
     _renderPalettes () {
       const root = this.$('palettes')
@@ -269,8 +282,6 @@
       })
     }
 
-    // ── State management ───────────────────────────────────────────────────────
-
     _apply (p = {}, external = false) {
       this._props = {
         apiKey:          p.apiKey          ?? '',
@@ -283,6 +294,8 @@
         textColor:       p.textColor       ?? '#0b1221',
         backendUrl:      p.backendUrl      ?? '',
         clientId:        p.clientId        ?? '',
+        schemaName:      p.schemaName      ?? '',
+        viewName:        p.viewName        ?? '',
         answerPrompt:    p.answerPrompt    ?? '',
         behaviourPrompt: p.behaviourPrompt ?? '',
         schemaPrompt:    p.schemaPrompt    ?? '',
@@ -291,8 +304,6 @@
       if (!external) this._setDirty(false)
       this._validateTheme()
     }
-
-    // ── Theme validation ───────────────────────────────────────────────────────
 
     _validateTheme () {
       const ids = ['primaryColor', 'primaryDark', 'surfaceColor', 'surfaceAlt', 'textColor']
@@ -309,8 +320,6 @@
       this.$('statusChip').textContent = this._dirty ? 'Unsaved changes' : 'No changes'
     }
 
-    // ── Collect current DOM values ─────────────────────────────────────────────
-
     _collect () {
       const get = id => (this.$(id) ? this.$(id).value : '')
       return {
@@ -324,79 +333,122 @@
         textColor:       get('textColor'),
         backendUrl:      get('backendUrl').trim(),
         clientId:        get('clientId').trim(),
+        schemaName:      get('schemaName').trim(),
+        viewName:        get('viewName').trim(),
         answerPrompt:    get('answerPrompt'),
         behaviourPrompt: get('behaviourPrompt'),
         schemaPrompt:    get('schemaPrompt'),
       }
     }
 
-    // ── Test Connection ────────────────────────────────────────────────────────
-
     /**
-     * Encrypts the current API key and POSTs to /presales/test-connection.
-     * Shows an inline status indicator — green on success, red on failure.
-     * Does NOT require the Update button to have been clicked first.
+     * Test Connection — two-step check:
+     *   Step 1: POST to /presales/test-connection with encrypted API key + model.
+     *   Step 2: Backend also validates the HANA view if schemaName + viewName are set.
+     *
+     * The result panel shows individual OpenAI and HANA status rows so the
+     * consultant can see exactly which step passed or failed.
      */
     async _testConnection () {
       const backendUrl = (this.$('backendUrl').value || '').trim().replace(/\/$/, '')
       const apiKey     = (this.$('apiKey').value     || '').trim()
       const model      = (this.$('model').value      || '').trim()
-      const status     = this.$('connStatus')
+      const schemaName = (this.$('schemaName').value || '').trim()
+      const viewName   = (this.$('viewName').value   || '').trim()
+
+      const statusEl = this.$('connStatus')
+      const detailEl = this.$('connDetail')
+      const openaiEl = this.$('cdOpenai')
+      const hanaEl   = this.$('cdHana')
+
+      // Reset detail panel
+      detailEl.classList.remove('show')
+      openaiEl.className = ''; openaiEl.textContent = ''
+      hanaEl.className   = ''; hanaEl.textContent   = ''
 
       if (!backendUrl) {
-        status.className = 'conn-status err'
-        status.textContent = '\u2717 Backend URL is empty'
+        statusEl.className   = 'conn-status err'
+        statusEl.textContent = '\u2717 Backend URL is empty'
         return
       }
       if (!apiKey) {
-        status.className = 'conn-status err'
-        status.textContent = '\u2717 API key is empty'
+        statusEl.className   = 'conn-status err'
+        statusEl.textContent = '\u2717 API key is empty'
         return
       }
 
-      status.className   = 'conn-status checking'
-      status.textContent = '\u29d7 Checking\u2026'
+      statusEl.className   = 'conn-status checking'
+      statusEl.textContent = '\u29d7 Checking\u2026'
       this.$('testConnBtn').disabled = true
 
       try {
-        const res = await fetch(`${backendUrl}/presales/test-connection`, {
+        const body = {
+          api_key_encrypted: xorEncrypt(apiKey),
+          model,
+        }
+        // Only include schema/view when both are provided
+        if (schemaName && viewName) {
+          body.schema_name = schemaName
+          body.view_name   = viewName
+        }
+
+        const res  = await fetch(`${backendUrl}/presales/test-connection`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
-            api_key_encrypted: xorEncrypt(apiKey),
-            model,
-          }),
+          body:    JSON.stringify(body),
         })
-
         const data = await res.json()
 
-        if (data.status === 'ok') {
-          status.className   = 'conn-status ok'
-          status.textContent = `\u2713 Connected \u2014 ${data.model}`
+        // Populate detail rows
+        detailEl.classList.add('show')
+
+        if (data.openai === 'ok') {
+          openaiEl.className   = 'ok-val'
+          openaiEl.textContent = `\u2713 Connected (${data.model || model})`
         } else {
-          status.className   = 'conn-status err'
-          status.textContent = `\u2717 ${data.detail || 'Connection failed'}`
+          openaiEl.className   = 'err-val'
+          openaiEl.textContent = `\u2717 ${data.openai_detail || 'Failed'}`
         }
+
+        if (!schemaName || !viewName) {
+          hanaEl.className   = 'skip-val'
+          hanaEl.textContent = 'Skipped — no schema/view configured'
+        } else if (data.hana === 'ok') {
+          hanaEl.className   = 'ok-val'
+          hanaEl.textContent = `\u2713 View found: ${schemaName}.${viewName}`
+        } else if (data.hana === 'error') {
+          hanaEl.className   = 'err-val'
+          hanaEl.textContent = `\u2717 ${data.hana_detail || 'View check failed'}`
+        } else {
+          hanaEl.className   = 'skip-val'
+          hanaEl.textContent = 'Skipped'
+        }
+
+        if (data.status === 'ok') {
+          statusEl.className   = 'conn-status ok'
+          statusEl.textContent = '\u2713 All checks passed'
+        } else {
+          statusEl.className   = 'conn-status err'
+          statusEl.textContent = '\u2717 One or more checks failed'
+        }
+
       } catch (e) {
-        status.className   = 'conn-status err'
-        status.textContent = `\u2717 ${e.message}`
+        statusEl.className   = 'conn-status err'
+        statusEl.textContent = `\u2717 ${e.message}`
+        detailEl.classList.remove('show')
       } finally {
         this.$('testConnBtn').disabled = false
       }
     }
 
-    // ── Toolbar actions ────────────────────────────────────────────────────────
-
     _update () {
       if (!this._validateTheme()) return
       const props = this._collect()
-
       this.dispatchEvent(new CustomEvent('propertiesChanged', {
         detail:   { properties: props },
         bubbles:  true,
         composed: true,
       }))
-
       this._props   = { ...props }
       this._initial = { ...props }
       this._setDirty(false)
@@ -413,8 +465,6 @@
       this._setDirty(false)
     }
 
-    // ── Toast ──────────────────────────────────────────────────────────────────
-
     _toast (msg) {
       const t = this.$('toast')
       t.textContent = msg
@@ -426,4 +476,4 @@
   if (!customElements.get('perci-bot-builder')) {
     customElements.define('perci-bot-builder', PerciBotBuilder)
   }
-})()
+}())

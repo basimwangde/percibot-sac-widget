@@ -3,7 +3,7 @@
   "license": "",
   "vendor": "Percipere Consulting",
   "id": "com.percipere.sac.percibot.presales",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "PerciBOT_Presales",
   "newInstancePrefix": "PerciBOT_Presales",
   "description": "Conversational AI assistant for SAP Analytics Cloud powered by PerciBOT backend",
@@ -46,7 +46,10 @@
     "answerPrompt":     { "type": "string", "default": "" },
     "behaviourPrompt":  { "type": "string", "default": "" },
     "schemaPrompt":     { "type": "string", "default": "" },
-    "clientId":         { "type": "string", "default": "" }
+    "clientId":         { "type": "string", "default": "" },
+
+    "schemaName":   { "type": "string", "default": "" },
+    "viewName":     { "type": "string", "default": "" }
   },
 
   "methods": {

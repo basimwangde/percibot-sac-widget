@@ -5,12 +5,6 @@
 */
 ;(function () {
 
-  // ---------------------------------------------------------------------------
-  // XOR + URL-safe Base64 encryption
-  // Must match utilities/simple_crypto.py on the backend.
-  // Key must equal PERCIBOT_CRYPTO_KEY env var on the server.
-  // WARNING: This is obfuscation only, not cryptographic security.
-  // ---------------------------------------------------------------------------
   const CRYPTO_KEY = 'percibot-default-key'
 
   function xorEncrypt (plaintext) {
@@ -24,9 +18,6 @@
       .replace(/=/g, '')
   }
 
-  // ---------------------------------------------------------------------------
-  // Template
-  // ---------------------------------------------------------------------------
   const tpl = document.createElement('template')
   tpl.innerHTML = `
     <style>
@@ -116,9 +107,6 @@
     </div>
   `
 
-  // ---------------------------------------------------------------------------
-  // Widget class
-  // ---------------------------------------------------------------------------
   class PerciBot extends HTMLElement {
     constructor () {
       super()
@@ -136,7 +124,6 @@
       this.$send.addEventListener('click',  () => this._send())
       this.$clear.addEventListener('click', () => (this.$chat.innerHTML = ''))
 
-      // Default props — all builder-configurable fields
       this._props = {
         apiKey:          '',
         model:           'gpt-4o-mini',
@@ -152,20 +139,18 @@
         behaviourPrompt: '',
         schemaPrompt:    '',
         clientId:        '',
+        schemaName:      '',
+        viewName:        '',
       }
 
       this._datasets = {}
 
-      // Stable per-widget-instance session ID — generated once on construction
-      // so all conversation turns within a session share the same ID.
       this._sessionId = (
         typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
           : `session-${Date.now()}-${Math.random().toString(36).slice(2)}`
       )
     }
-
-    // ── SAC lifecycle ──────────────────────────────────────────────────────────
 
     connectedCallback () {
       if (!this.$chat.innerHTML && this._props.welcomeText) {
@@ -194,7 +179,6 @@
       }
     }
 
-    // SAC older runtimes
     setProperties (props) { this.onCustomWidgetAfterUpdate(props) }
 
     onCustomWidgetRequest (methodName, params) {
@@ -205,8 +189,6 @@
         if (payload) this._parseAndApplyDatasets(payload)
       }
     }
-
-    // ── Dataset handling ───────────────────────────────────────────────────────
 
     _parseAndApplyDatasets (jsonStr) {
       try {
@@ -244,24 +226,10 @@
       }).join('') || '<div class="ds">No datasets</div>'
     }
 
-    // ── Core send ──────────────────────────────────────────────────────────────
-
     /**
-     * POST to /presales/ask on the configured backend.
-     *
-     * Request body:
-     *   query             — user question
-     *   session_id        — stable per-widget UUID
-     *   answer_prompt     — from builder
-     *   behaviour_prompt  — from builder
-     *   schema_prompt     — from builder
-     *   client_id         — from builder
-     *   api_key_encrypted — XOR+Base64 encrypted apiKey from builder
-     *   model             — from builder
-     *
-     * Response:
-     *   data.answer   — rendered when present (COMPLETED)
-     *   data.message  — rendered when answer absent (TERMINATED / FAILED)
+     * POST to /presales/ask.
+     * Includes schema_name and view_name when configured so the pipeline
+     * can abort early if the target view is not found.
      */
     async _send () {
       const q = (this.$input.value || '').trim()
@@ -270,14 +238,12 @@
       this._append('user', q)
       this.$input.value = ''
 
-      // Guard: backend URL
       const backendUrl = (this._props.backendUrl || '').trim().replace(/\/$/, '')
       if (!backendUrl) {
         this._append('bot', '\u26a0\ufe0f Backend URL not configured. Open the Builder panel.')
         return
       }
 
-      // Guard: API key
       const apiKey = (this._props.apiKey || '').trim()
       if (!apiKey) {
         this._append('bot', '\u26a0\ufe0f API key not configured. Open the Builder panel.')
@@ -288,19 +254,29 @@
       this.$send.disabled = true
 
       try {
+        const payload = {
+          query:             q,
+          session_id:        this._sessionId,
+          answer_prompt:     this._props.answerPrompt    || '',
+          behaviour_prompt:  this._props.behaviourPrompt || '',
+          schema_prompt:     this._props.schemaPrompt    || '',
+          client_id:         this._props.clientId        || '',
+          api_key_encrypted: xorEncrypt(apiKey),
+          model:             this._props.model           || 'gpt-4o-mini',
+        }
+
+        // Include view identifiers only when both are configured
+        const schemaName = (this._props.schemaName || '').trim()
+        const viewName   = (this._props.viewName   || '').trim()
+        if (schemaName && viewName) {
+          payload.schema_name = schemaName
+          payload.view_name   = viewName
+        }
+
         const res = await fetch(`${backendUrl}/presales/ask`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
-            query:             q,
-            session_id:        this._sessionId,
-            answer_prompt:     this._props.answerPrompt    || '',
-            behaviour_prompt:  this._props.behaviourPrompt || '',
-            schema_prompt:     this._props.schemaPrompt    || '',
-            client_id:         this._props.clientId        || '',
-            api_key_encrypted: xorEncrypt(apiKey),
-            model:             this._props.model           || 'gpt-4o-mini',
-          }),
+          body:    JSON.stringify(payload),
         })
 
         if (!res.ok) {
@@ -309,7 +285,7 @@
           throw new Error(`HTTP ${res.status} ${res.statusText}${detail ? ': ' + detail : ''}`)
         }
 
-        const data = await res.json()
+        const data    = await res.json()
         const display = (data.answer && data.answer.trim())
           ? data.answer
           : (data.message || '(No response received from backend)')
@@ -325,8 +301,6 @@
       }
     }
 
-    // ── Theme ──────────────────────────────────────────────────────────────────
-
     _applyTheme () {
       const wrap    = this._shadowRoot.querySelector('.wrap')
       const header  = this._shadowRoot.querySelector('header')
@@ -340,8 +314,6 @@
         btn.style.background = `linear-gradient(90deg, ${this._props.primaryColor || '#1f4fbf'}, ${this._props.primaryDark || '#163a8a'})`
       })
     }
-
-    // ── Markdown rendering ─────────────────────────────────────────────────────
 
     _escapeHtml (s = '') {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -371,10 +343,10 @@
       const lines = md.split('\n'); const out = []; let inUl = false, inOl = false
       const flush = () => { if (inUl){out.push('</ul>');inUl=false} if(inOl){out.push('</ol>');inOl=false} }
       for (const line of lines) {
-        if (/^\s*[-*]\s+/.test(line))    { if(!inUl){flush();out.push('<ul>');inUl=true} out.push(`<li>${this._mdInline(line.replace(/^\s*[-*]\s+/,''))}</li>`) }
-        else if (/^\s*\d+\.\s+/.test(line)) { if(!inOl){flush();out.push('<ol>');inOl=true} out.push(`<li>${this._mdInline(line.replace(/^\s*\d+\.\s+/,''))}</li>`) }
-        else if (line.trim()==='')       { flush(); out.push('<br/>') }
-        else                             { flush(); out.push(`<p>${this._mdInline(line)}</p>`) }
+        if (/^\s*[-*]\s+/.test(line))        { if(!inUl){flush();out.push('<ul>');inUl=true} out.push(`<li>${this._mdInline(line.replace(/^\s*[-*]\s+/,''))}</li>`) }
+        else if (/^\s*\d+\.\s+/.test(line))  { if(!inOl){flush();out.push('<ol>');inOl=true} out.push(`<li>${this._mdInline(line.replace(/^\s*\d+\.\s+/,''))}</li>`) }
+        else if (line.trim() === '')          { flush(); out.push('<br/>') }
+        else                                  { flush(); out.push(`<p>${this._mdInline(line)}</p>`) }
       }
       flush(); return out.join('')
     }
@@ -382,8 +354,6 @@
     _renderMarkdown (md = '') {
       return md.split(/\n{2,}/).map(b => { const t = this._mdTable(b); return t || this._mdLists(b) }).join('\n')
     }
-
-    // ── Message rendering ──────────────────────────────────────────────────────
 
     _append (role, text) {
       const b = document.createElement('div')
@@ -395,8 +365,6 @@
       this.$chat.appendChild(b)
       this.$chat.scrollTop = this.$chat.scrollHeight
     }
-
-    // ── Typing indicator ───────────────────────────────────────────────────────
 
     _startTyping () {
       if (this._typingEl) return
@@ -418,4 +386,4 @@
   if (!customElements.get('perci-bot')) {
     customElements.define('perci-bot', PerciBot)
   }
-})()
+}())
