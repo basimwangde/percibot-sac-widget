@@ -424,19 +424,15 @@
         bubbles:  true,
         composed: true,
       }))
-      this._props   = { ...props }
-      this._initial = { ...props }
+      this._props = { ...props }
+      // _initial is intentionally NOT updated here — Reset always returns
+      // to the state the builder had when it was first opened this session.
       this._setDirty(false)
       this._toast('Saved')
     }
 
     _reset () {
       this._apply(this._initial)
-      this.dispatchEvent(new CustomEvent('propertiesChanged', {
-        detail:   { properties: { ...this._initial } },
-        bubbles:  true,
-        composed: true,
-      }))
       this._setDirty(false)
     }
 
