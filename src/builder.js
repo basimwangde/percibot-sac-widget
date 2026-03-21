@@ -159,25 +159,25 @@
           <div class="hint">Identifier for the active client / demo context.</div>
         </div>
 
-        <!-- Answer Prompt -->
+        <!-- User Prompt (was: Answer Prompt) -->
         <div class="f" style="margin-bottom:12px">
-          <label>Answer Prompt</label>
-          <textarea id="answerPrompt" class="prompt" placeholder="Template for L2 answer generation&#8230;"></textarea>
-          <div class="hint">Template for L2 answer generation. No character limit.</div>
+          <label>User Prompt</label>
+          <textarea id="answerPrompt" class="prompt" placeholder="Describe how answers should be presented.&#10;e.g. Always respond in a formal tone.&#10;     Highlight the top performer in bold.&#10;     Show currency values in USD."></textarea>
+          <div class="hint">Optional — leave blank to use default formatting.</div>
         </div>
 
-        <!-- Behaviour Prompt -->
+        <!-- System Prompt (was: Behaviour Prompt) -->
         <div class="f" style="margin-bottom:12px">
-          <label>Behaviour Prompt</label>
-          <textarea id="behaviourPrompt" class="prompt" placeholder="SQL generation rules and constraints for L1 chain&#8230;"></textarea>
-          <div class="hint">SQL generation rules and constraints for L1 chain.</div>
+          <label>System Prompt</label>
+          <textarea id="behaviourPrompt" class="prompt" placeholder="Describe what this assistant does and what topics it covers.&#10;e.g. This assistant answers questions about regional sales performance.&#10;     It covers revenue, volume, and target vs. actual comparisons.&#10;     Metrics are reported in INR crores."></textarea>
+          <div class="hint">Describe the assistant's domain, scope, and any metric definitions.</div>
         </div>
 
-        <!-- Schema Prompt -->
+        <!-- Table Prompt (was: Schema Prompt) -->
         <div class="f">
-          <label>Schema Prompt</label>
-          <textarea id="schemaPrompt" class="prompt" placeholder="Active table schema and column definitions&#8230;"></textarea>
-          <div class="hint">Active table schema and column definitions. May be large.</div>
+          <label>Table Prompt</label>
+          <textarea id="schemaPrompt" class="prompt" placeholder='Provide your table details and any mandatory parameters.&#10;e.g. View: "MY_SCHEMA"."MY_VIEW"(PERIOD => &apos;YYYYMM&apos;)&#10;&#10;Columns:&#10;- REGION       Text — sales region name&#10;- PRODUCT      Text — product category&#10;- REVENUE      Decimal — net revenue&#10;- TARGET       Decimal — planned revenue&#10;- PERIOD       Text(6) — reporting month (YYYYMM)'></textarea>
+          <div class="hint">Include the full view name, mandatory parameters, and a description of each column.</div>
         </div>
       </div>
 
