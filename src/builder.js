@@ -258,11 +258,14 @@
 
     onCustomWidgetBuilderInit (host) {
       this._apply((host && host.properties) || {})
-      this._initial = { ...this._props }
+      // Capture the opening state once — never overwritten, even after Update.
+      if (!this._initial) this._initial = { ...this._props }
     }
 
     onCustomWidgetAfterUpdate (changedProps) {
       this._apply(changedProps, true)
+      // Capture opening state if SAC calls this before onCustomWidgetBuilderInit.
+      if (!this._initial) this._initial = { ...this._props }
     }
 
     _renderPalettes () {
@@ -432,8 +435,11 @@
     }
 
     _reset () {
+      if (!this._initial) return
       this._apply(this._initial)
-      this._setDirty(false)
+      // After restoring, mark dirty so the consultant can see the restored state
+      // and choose to press Update if they want to keep it, or keep editing.
+      this._setDirty(true)
     }
 
     _toast (msg) {
