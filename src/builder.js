@@ -176,8 +176,8 @@
         <!-- Table Prompt (was: Schema Prompt) -->
         <div class="f">
           <label>Table Prompt</label>
-          <textarea id="schemaPrompt" class="prompt" placeholder='Provide your table details and any mandatory parameters.&#10;e.g. View: "MY_SCHEMA"."MY_VIEW"(PERIOD => &apos;YYYYMM&apos;)&#10;&#10;Columns:&#10;- REGION       Text — sales region name&#10;- PRODUCT      Text — product category&#10;- REVENUE      Decimal — net revenue&#10;- TARGET       Decimal — planned revenue&#10;- PERIOD       Text(6) — reporting month (YYYYMM)'></textarea>
-          <div class="hint">Include the full view name, mandatory parameters, and a description of each column.</div>
+          <textarea id="schemaPrompt" class="prompt" placeholder='View: "SCHEMA_NAME"."VIEW_NAME"(PARAMETER_NAME => &apos;VALUE&apos;)&#10;&#10;Parameter behaviour:&#10;Describe what the parameter does — e.g. filters to a specific year,&#10;or returns a sliding window of the last N years including the given value.&#10;&#10;Columns:&#10;- COLUMN_NAME   DataType — what this column represents&#10;- COLUMN_NAME   DataType — what this column represents&#10;&#10;Value examples (for text/category columns):&#10;- COLUMN_NAME: &apos;Option A&apos;, &apos;Option B&apos;, &apos;Option C&apos;'></textarea>
+          <div class="hint">Include the view name, what the parameter filters, and a description of each column.</div>
         </div>
       </div>
 
