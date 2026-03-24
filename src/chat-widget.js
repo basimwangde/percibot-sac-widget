@@ -1,505 +1,560 @@
 /* PerciBot — SAC Chat Widget
-   Sends user queries to the PerciBOT FastAPI backend (/presales/ask).
-   API key is XOR+Base64 encrypted before transit — matching backend simple_crypto.py.
-   All LLM work is performed server-side; this widget is a pure UI layer.
-
-   Image attachment support (v1.3):
-     - Paperclip button opens a file picker (JPEG / PNG / WEBP / GIF, max 5 MB).
-     - Paste (Ctrl+V / ⌘+V) anywhere in the widget captures images from clipboard.
-     - A preview strip above the textarea shows a thumbnail + remove button.
-     - On Send, the image is base64-encoded and included in the JSON payload as
-       `image_base64` (data-URI format). The backend field is optional — requests
-       without an image behave identically to before.
-     - The user message bubble renders the thumbnail inline; clicking opens a
-       lightbox for full-size viewing.
-     - Only one image per message is supported (last attached wins).
 */
 ;(function () {
 
-  /**
-   * PerciBOT backend endpoint.
-   * To redirect the widget to a different deployment, update this value.
-   */
-  const BACKEND_URL = 'https://percibot.cfapps.us10-001.hana.ondemand.com'
-
-  const CRYPTO_KEY = 'percibot-default-key'
-
-  /** Maximum allowed image size in bytes (5 MB). */
+  const BACKEND_URL     = 'https://percibot.cfapps.us10-001.hana.ondemand.com'
+  const CRYPTO_KEY      = 'percibot-default-key'
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+  const ACCEPTED_IMAGES = ['image/jpeg','image/png','image/webp','image/gif']
 
-  /** Accepted MIME types for the file picker. */
-  const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-
-  function xorEncrypt (plaintext) {
-    const enc   = new TextEncoder()
-    const ptB   = enc.encode(plaintext)
-    const keyB  = enc.encode(CRYPTO_KEY)
-    const xored = ptB.map((b, i) => b ^ keyB[i % keyB.length])
-    return btoa(String.fromCharCode(...xored))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=/g, '')
+  function xorEncrypt (pt) {
+    const enc = new TextEncoder()
+    const ptB = enc.encode(pt), keyB = enc.encode(CRYPTO_KEY)
+    const x   = ptB.map((b,i) => b ^ keyB[i % keyB.length])
+    return btoa(String.fromCharCode(...x)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')
   }
 
-  // ---------------------------------------------------------------------------
-  // Template
-  // ---------------------------------------------------------------------------
+  // ── Inline SVG icons ──────────────────────────────────────────────────────
+  const IC = {
+    plus: `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+             <line x1="10" y1="3" x2="10" y2="17"/><line x1="3" y1="10" x2="17" y2="10"/>
+           </svg>`,
+    clip: `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+             <path d="M17 10.5L9.5 18a5 5 0 0 1-7.07-7.07l8-8a3.33 3.33 0 0 1 4.71 4.71L7.41 15.41a1.67 1.67 0 0 1-2.36-2.36l7.07-7.07"/>
+           </svg>`,
+    globe: `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="10" cy="10" r="8"/>
+              <path d="M2 10h16M10 2a13 13 0 0 1 0 16M10 2a13 13 0 0 0 0 16"/>
+            </svg>`,
+    send: `<svg viewBox="0 0 20 20" fill="currentColor">
+             <path d="M3.1 3.1a1 1 0 0 1 1.09-.24l13 5a1 1 0 0 1 0 1.87l-13 5a1 1 0 0 1-1.33-1.33L4.9 10 2.86 4.44a1 1 0 0 1 .24-1.34z"/>
+           </svg>`,
+  }
+
+  // ── Template ──────────────────────────────────────────────────────────────
   const tpl = document.createElement('template')
-  tpl.innerHTML = `
-    <style>
-      :host { display:block; height:100%; font:14px/1.45 var(--sapFontFamily, "72", Arial); color:#0b1221 }
+  tpl.innerHTML = /* html */`
+  <style>
+    /* ─ Reset / host ──────────────────────────────────────────────── */
+    :host { display:block; height:100%; font:14px/1.5 "Inter","Segoe UI",Arial,sans-serif; color:#0d1117; box-sizing:border-box }
+    *, *::before, *::after { box-sizing:inherit; margin:0; padding:0 }
 
-      /* ── Layout ─────────────────────────────────────────────────── */
-      .wrap  { height:100%; display:flex; flex-direction:column; box-sizing:border-box; background:#fff }
-      header {
-        display:flex; align-items:center; justify-content:space-between;
-        padding:10px 14px; color:#fff; border-radius:10px; margin:10px; min-height:42px;
-        position:relative;
-      }
-      .brand { font-weight:700 }
-      .chip  { font-size:12px; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,.2); cursor:pointer }
-      .body  { flex:1; display:flex; flex-direction:column; gap:10px; padding:10px; min-height:0 }
-      .panel {
-        flex:1; overflow-y:auto; overflow-x:hidden;
-        border:1px solid #e7eaf0; border-radius:12px; padding:10px; background:#f7f9fc; position:relative;
-      }
+    /* ─ Shell ─────────────────────────────────────────────────────── */
+    .wrap { height:100%; display:flex; flex-direction:column; background:#fff }
 
-      /* ── Messages ───────────────────────────────────────────────── */
-      .msg { max-width:85%; margin:6px 0; padding:10px 12px; border-radius:14px; box-shadow:0 1px 2px rgba(0,0,0,.04) }
-      .user { margin-left:auto; }
+    /* ─ Header ────────────────────────────────────────────────────── */
+    header {
+      flex-shrink:0; display:flex; align-items:center; justify-content:space-between;
+      padding:10px 14px; color:#fff; border-radius:12px; margin:10px 10px 0;
+      min-height:44px; position:relative;
+    }
+    .brand  { font-weight:700; font-size:15px; letter-spacing:-.2px }
+    .chip   {
+      font-size:11px; font-weight:600; padding:3px 10px; border-radius:999px;
+      background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.3);
+      cursor:pointer; user-select:none; white-space:nowrap; transition:background .15s;
+    }
+    .chip:hover { background:rgba(255,255,255,.28) }
 
-      .msg.bot p          { margin:6px 0 }
-      .msg.bot ul,
-      .msg.bot ol         { padding-left:20px; margin:6px 0 }
-      .msg.bot li         { margin:4px 0 }
-      .msg.bot table      { border-collapse:collapse; width:100%; margin:6px 0 }
-      .msg.bot th,
-      .msg.bot td         { border:1px solid #e7eaf0; padding:6px 8px; text-align:left }
-      .msg.bot thead th   { background:#f3f6ff }
-      .msg.bot code       { background:#f1f3f7; padding:2px 4px; border-radius:4px }
+    /* ─ Dataset drawer ────────────────────────────────────────────── */
+    #dsDrawer {
+      position:absolute; right:14px; top:54px; z-index:30;
+      min-width:240px; max-width:380px; max-height:240px; overflow:auto;
+      background:#fff; border:1px solid #e3e6f0; border-radius:12px;
+      box-shadow:0 12px 32px rgba(0,0,0,.13); padding:10px; font-size:12px; display:none;
+    }
+    #dsDrawer .ds            { padding:6px 4px; border-bottom:1px dashed #eee }
+    #dsDrawer .ds:last-child { border-bottom:none }
+    #dsDrawer .name          { font-weight:700 }
 
-      /* Typing indicator */
-      .msg.bot.typing { display:inline-flex; align-items:center; gap:8px; position:sticky; bottom:0 }
-      .typing .dots   { display:inline-flex; gap:4px }
-      .typing .dots span {
-        width:6px; height:6px; border-radius:50%; background:#c7ccd8; display:inline-block;
-        animation: percibot-blink 1s infinite ease-in-out;
-      }
-      .typing .dots span:nth-child(2) { animation-delay:.15s }
-      .typing .dots span:nth-child(3) { animation-delay:.30s }
-      @keyframes percibot-blink {
-        0%   { opacity:.2; transform:translateY(0)    }
-        20%  { opacity:1;  transform:translateY(-2px) }
-        100% { opacity:.2; transform:translateY(0)    }
-      }
+    /* ─ Body ──────────────────────────────────────────────────────── */
+    .body  { flex:1; display:flex; flex-direction:column; padding:10px; gap:8px; min-height:0 }
+    .panel {
+      flex:1; overflow-y:auto; overflow-x:hidden; padding:12px 14px;
+      border:1px solid #e3e6f0; border-radius:14px; background:#f8f9fc;
+    }
 
-      /* ── Input area ─────────────────────────────────────────────── */
-      .inputWrapper { display:flex; flex-direction:column; gap:6px }
+    /* ─ Messages ──────────────────────────────────────────────────── */
+    .msg {
+      max-width:82%; margin:5px 0; padding:10px 14px;
+      border-radius:18px; line-height:1.55;
+      box-shadow:0 1px 2px rgba(0,0,0,.04);
+      word-break:break-word;
+    }
+    .user { margin-left:auto; border-bottom-right-radius:4px }
+    .bot  { border-bottom-left-radius:4px }
 
-      /* Image preview strip */
-      .imgPreview {
-        display:none; align-items:center; gap:8px;
-        padding:6px 10px; background:#f0f4ff;
-        border:1px solid #d0daf7; border-radius:10px;
-      }
-      .imgPreview.visible { display:flex }
-      .imgPreview .thumb  {
-        width:48px; height:48px; object-fit:cover; border-radius:6px;
-        border:1px solid #c5cee0; cursor:pointer; flex-shrink:0;
-      }
-      .imgPreview .imgMeta { flex:1; font-size:12px; color:#445; overflow:hidden; white-space:nowrap; text-overflow:ellipsis }
-      .imgPreview .imgRemove {
-        background:none; border:none; cursor:pointer; padding:4px;
-        color:#888; font-size:16px; line-height:1; flex-shrink:0;
-        border-radius:6px;
-      }
-      .imgPreview .imgRemove:hover { background:#fee2e2; color:#b00 }
+    .msg.bot p        { margin:5px 0 }
+    .msg.bot ul,
+    .msg.bot ol       { padding-left:20px; margin:5px 0 }
+    .msg.bot li       { margin:3px 0 }
+    .msg.bot table    { border-collapse:collapse; width:100%; margin:6px 0; font-size:13px }
+    .msg.bot th,
+    .msg.bot td       { border:1px solid #e3e6f0; padding:5px 9px; text-align:left }
+    .msg.bot thead th { background:#f2f5ff }
+    .msg.bot code     { background:#f0f2f7; padding:1px 5px; border-radius:4px; font-size:12.5px; font-family:monospace }
 
-      /* Loading shimmer inside preview strip */
-      .imgLoading {
-        display:none; align-items:center; gap:10px;
-        padding:8px 12px; background:#f0f4ff;
-        border:1px solid #d0daf7; border-radius:10px;
-      }
-      .imgLoading.visible { display:flex }
-      .shimmer {
-        width:48px; height:48px; border-radius:6px;
-        background: linear-gradient(90deg, #e8ecf7 25%, #d5dcf5 50%, #e8ecf7 75%);
-        background-size:200% 100%;
-        animation: shimmer 1.2s infinite;
-        flex-shrink:0;
-      }
-      .shimmerText { font-size:12px; color:#667; font-style:italic }
-      @keyframes shimmer { 0% { background-position:200% 0 } 100% { background-position:-200% 0 } }
+    /* Typing animation */
+    .typing { display:inline-flex !important; align-items:center; gap:8px; position:sticky; bottom:0 }
+    .dots   { display:inline-flex; gap:4px }
+    .dots b {
+      display:inline-block; width:6px; height:6px; border-radius:50%; background:#b0b8cc;
+      animation:pb-blink 1s ease-in-out infinite;
+    }
+    .dots b:nth-child(2) { animation-delay:.18s }
+    .dots b:nth-child(3) { animation-delay:.36s }
+    @keyframes pb-blink {
+      0%,100% { opacity:.2; transform:translateY(0)    }
+      40%     { opacity:1;  transform:translateY(-3px) }
+    }
 
-      .inputRow { display:flex; gap:8px; align-items:flex-start }
+    /* Image in user bubble */
+    .msgImg {
+      display:block; max-width:100%; max-height:200px; object-fit:cover;
+      border-radius:10px; margin-bottom:7px; cursor:zoom-in;
+      border:1px solid rgba(0,0,0,.07); transition:opacity .15s;
+    }
+    .msgImg:hover { opacity:.87 }
 
-      textarea {
-        flex:1; resize:vertical; min-height:64px; max-height:220px;
-        padding:10px 12px; border:1px solid #d0d3da; border-radius:12px; background:#fff; outline:none;
-      }
-      textarea:focus { border-color:#4d9aff; box-shadow:0 0 0 2px rgba(77,154,255,.15) }
+    /* ─ Composer wrapper ──────────────────────────────────────────── */
+    .cWrap { position:relative; flex-shrink:0 }
 
-      .inputActions { display:flex; flex-direction:column; gap:8px }
+    /* The card itself */
+    .composer {
+      border:1.5px solid #d5d9e8; border-radius:18px; background:#fff;
+      transition:border-color .18s, box-shadow .18s;
+      box-shadow:0 1px 5px rgba(0,0,0,.05);
+    }
+    .composer:focus-within {
+      border-color:#7b9ef0;
+      box-shadow:0 0 0 3px rgba(90,130,230,.10), 0 2px 10px rgba(0,0,0,.07);
+    }
 
-      button { padding:10px 14px; border:1px solid #d0d3da; border-radius:12px; background:#fff; cursor:pointer }
-      button.primary { color:#fff; border-color:transparent }
-      button:disabled { opacity:.5; cursor:not-allowed }
+    /* Loading shimmer row */
+    .shimRow { display:none; align-items:center; gap:10px; padding:8px 14px 0 }
+    .shimRow.vis { display:flex }
+    .shimBox {
+      width:26px; height:26px; border-radius:6px; flex-shrink:0;
+      background:linear-gradient(90deg,#e8ecf8 25%,#d4d9f0 50%,#e8ecf8 75%);
+      background-size:200% 100%; animation:pb-shim 1.1s infinite;
+    }
+    .shimTxt { font-size:12px; color:#7a80a0; font-style:italic }
+    @keyframes pb-shim { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
-      /* Paperclip attach button */
-      .btnAttach {
-        width:40px; height:40px; padding:0;
-        display:flex; align-items:center; justify-content:center;
-        border:1px solid #d0d3da; border-radius:12px; background:#fff;
-        cursor:pointer; flex-shrink:0; transition:background .15s, border-color .15s;
-      }
-      .btnAttach:hover  { background:#f0f4ff; border-color:#a0b4e8 }
-      .btnAttach svg    { width:18px; height:18px; stroke:#556; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
-      .btnAttach.active { background:#e8eeff; border-color:#4d6ed4 }
-      .btnAttach.active svg { stroke:#1f4fbf }
+    /* Pills row */
+    .pills { display:none; flex-wrap:wrap; align-items:center; gap:6px; padding:8px 12px 0 }
+    .pills.vis { display:flex }
 
-      /* Image in user bubble */
-      .msgImg {
-        display:block; max-width:100%; max-height:180px; object-fit:cover;
-        border-radius:8px; margin-bottom:6px; cursor:pointer;
-        border:1px solid rgba(0,0,0,.08);
-        transition: opacity .15s;
-      }
-      .msgImg:hover { opacity:.85 }
+    .pill {
+      display:inline-flex; align-items:center; gap:5px; padding:4px 10px;
+      border-radius:999px; font-size:12px; font-weight:500;
+      background:#eef1fc; border:1px solid #cdd5f0; color:#2b46a8;
+      user-select:none; position:relative;
+    }
+    .pill svg { width:13px; height:13px; flex-shrink:0 }
+    .pill .plabel {
+      max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .pthumb {
+      width:22px; height:22px; object-fit:cover; border-radius:4px;
+      border:1px solid rgba(0,0,0,.08); flex-shrink:0; cursor:zoom-in;
+    }
+    .prem {
+      display:none; align-items:center; justify-content:center;
+      width:16px; height:16px; border-radius:50%;
+      background:rgba(43,70,168,.18); border:none; padding:0; cursor:pointer;
+      font-size:10px; line-height:1; color:#2b46a8; flex-shrink:0;
+    }
+    .pill:hover .prem { display:inline-flex }
 
-      /* Lightbox */
-      .lightbox {
-        display:none; position:fixed; inset:0; z-index:9999;
-        background:rgba(0,0,0,.72); align-items:center; justify-content:center;
-      }
-      .lightbox.open { display:flex }
-      .lightbox img  { max-width:90vw; max-height:90vh; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.5) }
-      .lightbox .lbClose {
-        position:absolute; top:18px; right:22px;
-        background:rgba(255,255,255,.15); border:none; border-radius:50%;
-        width:36px; height:36px; font-size:20px; color:#fff;
-        cursor:pointer; display:flex; align-items:center; justify-content:center;
-      }
-      .lightbox .lbClose:hover { background:rgba(255,255,255,.3) }
+    /* Input row */
+    .inputRow { display:flex; align-items:flex-end; gap:6px; padding:8px 10px 8px 10px }
 
-      /* Misc */
-      .muted  { opacity:.7; font-size:12px }
-      .footer { display:flex; justify-content:space-between; align-items:center; padding:0 10px 10px }
+    /* Plus button */
+    .btnPlus {
+      flex-shrink:0; width:30px; height:30px; border-radius:8px;
+      border:1.5px solid #d0d4e0; background:#fff;
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer; color:#58607e; transition:background .14s, border-color .14s, color .14s;
+    }
+    .btnPlus svg { width:15px; height:15px }
+    .btnPlus:hover  { background:#eaedf8; border-color:#a8b2d4; color:#1f4fbf }
+    .btnPlus.active { background:#1f4fbf; border-color:#1f4fbf; color:#fff }
 
-      #dsDrawer {
-        position:absolute; right:14px; top:58px; z-index:10;
-        max-width:420px; max-height:240px; overflow:auto;
-        background:#fff; border:1px solid #e7eaf0; border-radius:10px;
-        box-shadow:0 12px 28px rgba(0,0,0,.12); padding:10px; font-size:12px; display:none;
-      }
-      #dsDrawer .ds         { padding:6px 4px; border-bottom:1px dashed #eee }
-      #dsDrawer .ds:last-child { border-bottom:none }
-      #dsDrawer .name       { font-weight:700 }
-    </style>
+    /* Textarea */
+    textarea {
+      flex:1; resize:none; height:34px; min-height:34px; max-height:196px;
+      padding:6px 2px; border:none; outline:none; background:transparent;
+      font:inherit; font-size:14px; line-height:1.5; color:inherit; overflow-y:auto;
+    }
+    textarea::placeholder { color:#9ba3bd }
 
-    <div class="wrap">
-      <header>
-        <div class="brand">PerciBOT</div>
-        <div class="chip" id="modelChip">AI Assistant</div>
-        <div id="dsDrawer"></div>
-      </header>
+    /* Send button */
+    .btnSend {
+      flex-shrink:0; width:32px; height:32px; border-radius:9px;
+      border:none; display:flex; align-items:center; justify-content:center;
+      cursor:pointer; color:#fff; transition:opacity .15s, transform .1s;
+    }
+    .btnSend svg { width:14px; height:14px }
+    .btnSend:disabled { opacity:.3; cursor:not-allowed }
+    .btnSend:not(:disabled):hover  { opacity:.86 }
+    .btnSend:not(:disabled):active { transform:scale(.93) }
 
-      <div class="body">
-        <div class="panel" id="chat"></div>
+    /* ─ Plus popover ──────────────────────────────────────────────── */
+    .popover {
+      position:absolute; bottom:calc(100% + 8px); left:0;
+      min-width:190px; background:#fff; border:1px solid #dde1ee;
+      border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.14);
+      padding:5px; z-index:200; display:none;
+    }
+    .popover.vis { display:block }
 
-        <div class="inputWrapper">
-          <!-- Loading shimmer (shown while FileReader processes the image) -->
-          <div class="imgLoading" id="imgLoading">
-            <div class="shimmer"></div>
-            <span class="shimmerText">Attaching image…</span>
+    .popItem {
+      display:flex; align-items:center; gap:10px; padding:9px 12px;
+      border-radius:9px; cursor:pointer; font-size:13px; font-weight:500;
+      color:#1a1f36; transition:background .12s; user-select:none;
+    }
+    .popItem:hover { background:#f0f3fc }
+    .popItem.sel   { background:#eef1fc; color:#1f4fbf }
+    .popItem svg   { width:16px; height:16px; flex-shrink:0; color:inherit }
+    .popLabel { flex:1 }
+    .popTick  {
+      width:17px; height:17px; border-radius:50%; background:#1f4fbf;
+      display:none; align-items:center; justify-content:center; flex-shrink:0;
+    }
+    .popTick::after { content:'✓'; font-size:9.5px; color:#fff; font-weight:700 }
+    .popItem.sel .popTick { display:flex }
+
+    /* ─ Footer ────────────────────────────────────────────────────── */
+    .footer {
+      flex-shrink:0; display:flex; justify-content:space-between; align-items:center;
+      padding:4px 14px 8px; font-size:11.5px; opacity:.6;
+    }
+    .footer a { color:inherit; text-decoration:none }
+    .footer a:hover { text-decoration:underline }
+
+    /* ─ Lightbox ──────────────────────────────────────────────────── */
+    .lightbox {
+      display:none; position:fixed; inset:0; z-index:9999;
+      background:rgba(0,0,0,.78); align-items:center; justify-content:center;
+    }
+    .lightbox.vis { display:flex }
+    .lightbox img {
+      max-width:92vw; max-height:90vh; border-radius:10px;
+      box-shadow:0 24px 64px rgba(0,0,0,.5);
+    }
+    .lbX {
+      position:absolute; top:16px; right:18px; background:rgba(255,255,255,.14);
+      border:none; border-radius:50%; width:36px; height:36px; font-size:17px;
+      color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center;
+      transition:background .14s;
+    }
+    .lbX:hover { background:rgba(255,255,255,.28) }
+  </style>
+
+  <div class="wrap">
+
+    <!-- Header -->
+    <header>
+      <div class="brand">PerciBOT</div>
+      <div class="chip" id="modelChip">AI Assistant</div>
+      <div id="dsDrawer"></div>
+    </header>
+
+    <!-- Body -->
+    <div class="body">
+      <div class="panel" id="chat"></div>
+
+      <!-- Composer card + popover -->
+      <div class="cWrap">
+
+        <!-- Upward popover -->
+        <div class="popover" id="popover">
+          <div class="popItem" id="popAttach">
+            ${IC.clip}
+            <span class="popLabel">Add files</span>
           </div>
-
-          <!-- Attached image preview strip -->
-          <div class="imgPreview" id="imgPreview">
-            <img class="thumb" id="previewThumb" src="" alt="preview" />
-            <span class="imgMeta" id="previewMeta"></span>
-            <button class="imgRemove" id="imgRemove" title="Remove image">&#x2715;</button>
-          </div>
-
-          <!-- Input row: textarea + action buttons -->
-          <div class="inputRow">
-            <textarea id="input" placeholder="Ask anything about your analytics\u2026"></textarea>
-            <div class="inputActions">
-              <button id="send" class="primary">Send</button>
-              <button id="clear">Clear</button>
-              <!-- Paperclip: attach image -->
-              <button class="btnAttach" id="btnAttach" title="Attach image (JPEG / PNG / WEBP / GIF, max 5 MB)">
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-                </svg>
-              </button>
-            </div>
+          <div class="popItem" id="popWS">
+            ${IC.globe}
+            <span class="popLabel">Web search</span>
+            <span class="popTick"></span>
           </div>
         </div>
-      </div>
 
-      <!-- Hidden file input — triggered programmatically -->
-      <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/gif"
-             style="display:none" aria-hidden="true" />
+        <div class="composer">
 
-      <!-- Lightbox overlay for full-size image viewing -->
-      <div class="lightbox" id="lightbox">
-        <button class="lbClose" id="lbClose" title="Close">&#x2715;</button>
-        <img id="lbImg" src="" alt="Full size preview" />
-      </div>
+          <!-- Shimmer while FileReader loads -->
+          <div class="shimRow" id="shimRow">
+            <div class="shimBox"></div>
+            <span class="shimTxt">Attaching image…</span>
+          </div>
 
-      <div class="footer">
-        <div class="muted" id="hint">AI can make mistakes. Please verify results.</div>
-        <div class="muted"><a href="https://www.linkedin.com/company/percipere/" target="_blank">Percipere Consulting</a></div>
+          <!-- Active pills (image + web search) -->
+          <div class="pills" id="pills"></div>
+
+          <!-- Textarea row -->
+          <div class="inputRow">
+            <button class="btnPlus" id="btnPlus" title="Add attachment or enable tools">
+              ${IC.plus}
+            </button>
+            <textarea id="input" rows="1"
+              placeholder="Ask anything about your analytics…"></textarea>
+            <button class="btnSend" id="btnSend" disabled title="Send  (Ctrl+Enter)">
+              ${IC.send}
+            </button>
+          </div>
+
+        </div>
       </div>
+    </div><!-- /.body -->
+
+    <!-- Hidden file input -->
+    <input type="file" id="fileInput"
+           accept="image/jpeg,image/png,image/webp,image/gif"
+           style="display:none" aria-hidden="true" />
+
+    <!-- Lightbox -->
+    <div class="lightbox" id="lb">
+      <button class="lbX" id="lbX">&#x2715;</button>
+      <img id="lbImg" src="" alt="Preview" />
     </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <span>AI can make mistakes. Please verify results.</span>
+      <span><a href="https://www.linkedin.com/company/percipere/" target="_blank" rel="noopener">Percipere Consulting</a></span>
+    </div>
+
+  </div>
   `
 
-  // ---------------------------------------------------------------------------
-  // Component
-  // ---------------------------------------------------------------------------
+  // ── Component class ────────────────────────────────────────────────────────
   class PerciBot extends HTMLElement {
+
     constructor () {
       super()
-      this._shadowRoot = this.attachShadow({ mode: 'open' })
-      this._shadowRoot.appendChild(tpl.content.cloneNode(true))
-      this.$ = id => this._shadowRoot.getElementById(id)
+      this._sr = this.attachShadow({ mode: 'open' })
+      this._sr.appendChild(tpl.content.cloneNode(true))
+      this.$ = id => this._sr.getElementById(id)
 
-      this.$chat      = this.$('chat')
-      this.$input     = this.$('input')
-      this.$send      = this.$('send')
-      this.$clear     = this.$('clear')
-      this.$modelChip = this.$('modelChip')
-
-      // Image attachment state
-      this._attachedImage = null  // { dataUri: string, name: string, mimeType: string } | null
-
-      this._bindEvents()
+      // ── State ──────────────────────────────────────────────────────
+      this._img        = null   // { dataUri, name, mimeType } | null
+      this._ws         = false  // web search enabled
+      this._popOpen    = false
+      this._typingEl   = null
 
       this._props = {
-        apiKey:          '',
-        model:           'gpt-4o-mini',
-        welcomeText:     'Hello, I\u2019m PerciBOT! How can I assist you?',
-        datasets:        '',
-        primaryColor:    '#1f4fbf',
-        primaryDark:     '#163a8a',
-        surfaceColor:    '#ffffff',
-        surfaceAlt:      '#f6f8ff',
-        textColor:       '#0b1221',
-        answerPrompt:    '',
-        behaviourPrompt: '',
-        schemaPrompt:    '',
-        clientId:        '',
-        schemaName:      '',
-        viewName:        '',
+        apiKey:'', model:'gpt-4o-mini',
+        welcomeText: 'Hello, I\u2019m PerciBOT! How can I assist you?',
+        datasets:'', primaryColor:'#1f4fbf', primaryDark:'#163a8a',
+        surfaceColor:'#ffffff', surfaceAlt:'#f8f9fc', textColor:'#0d1117',
+        answerPrompt:'', behaviourPrompt:'', schemaPrompt:'',
+        clientId:'', schemaName:'', viewName:'',
       }
-
       this._datasets = {}
-
       this._sessionId = (
         typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
           : `session-${Date.now()}-${Math.random().toString(36).slice(2)}`
       )
+
+      this._wire()
     }
 
-    // -------------------------------------------------------------------------
-    // Lifecycle
-    // -------------------------------------------------------------------------
+    // ── SAC lifecycle hooks ──────────────────────────────────────────────────
 
     connectedCallback () {
-      if (!this.$chat.innerHTML && this._props.welcomeText) {
-        this._append('bot', this._props.welcomeText)
-      }
-      this.$modelChip.addEventListener('click', () => {
-        const d = this._shadowRoot.getElementById('dsDrawer')
+      if (!this.$('chat').innerHTML && this._props.welcomeText) this._botMsg(this._props.welcomeText)
+      this.$('modelChip').addEventListener('click', () => {
+        const d = this.$('dsDrawer')
         d.style.display = d.style.display === 'block' ? 'none' : 'block'
       })
     }
 
-    onCustomWidgetAfterUpdate (changedProps = {}) {
-      Object.assign(this._props, changedProps)
+    onCustomWidgetAfterUpdate (p = {}) {
+      Object.assign(this._props, p)
       this._applyTheme()
-      if (typeof changedProps.datasets === 'string') this._parseAndApplyDatasets(changedProps.datasets)
-      if (!this.$chat.innerHTML && this._props.welcomeText) this._append('bot', this._props.welcomeText)
+      if (typeof p.datasets === 'string') this._parseDS(p.datasets)
+      if (!this.$('chat').innerHTML && this._props.welcomeText) this._botMsg(this._props.welcomeText)
     }
 
-    setProperties (props) { this.onCustomWidgetAfterUpdate(props) }
+    setProperties (p) { this.onCustomWidgetAfterUpdate(p) }
 
-    onCustomWidgetRequest (methodName, params) {
-      if (methodName === 'setDatasets') {
-        const payload = typeof params === 'string' ? params
-          : Array.isArray(params) ? (params[0] || '')
-          : (params && params.payload) || ''
-        if (payload) this._parseAndApplyDatasets(payload)
+    onCustomWidgetRequest (method, params) {
+      if (method === 'setDatasets') {
+        const v = typeof params === 'string' ? params
+          : Array.isArray(params) ? (params[0] || '') : (params && params.payload) || ''
+        if (v) this._parseDS(v)
       }
     }
 
-    // -------------------------------------------------------------------------
-    // Event wiring
-    // -------------------------------------------------------------------------
+    // ── Event wiring ─────────────────────────────────────────────────────────
 
-    _bindEvents () {
-      this.$send .addEventListener('click', () => this._send())
-      this.$clear.addEventListener('click', () => {
-        this.$chat.innerHTML = ''
-        this._clearAttachment()
+    _wire () {
+      const ta    = this.$('input')
+      const send  = this.$('btnSend')
+      const plus  = this.$('btnPlus')
+      const pop   = this.$('popover')
+
+      // Textarea: auto-resize + send-button state
+      ta.addEventListener('input', () => { this._resize(); this._syncSend() })
+      ta.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this._send() }
       })
 
-      // Paperclip → open file picker
-      this.$('btnAttach').addEventListener('click', () => this.$('fileInput').click())
+      // Send
+      send.addEventListener('click', () => this._send())
 
-      // File picker selection
+      // Plus: toggle popover
+      plus.addEventListener('click', e => { e.stopPropagation(); this._togglePop() })
+
+      // Popover items
+      this.$('popAttach').addEventListener('click', () => { this._closePop(); this.$('fileInput').click() })
+      this.$('popWS').addEventListener('click', () => {
+        this._ws = !this._ws
+        this.$('popWS').classList.toggle('sel', this._ws)
+        this._renderPills()
+        this._syncSend()
+        this._closePop()
+      })
+
+      // File input
       this.$('fileInput').addEventListener('change', e => {
-        const file = e.target.files && e.target.files[0]
-        if (file) this._handleImageFile(file)
-        // Reset so the same file can be re-selected if removed and re-added
+        const f = e.target.files && e.target.files[0]
+        if (f) this._loadFile(f)
         e.target.value = ''
       })
 
-      // Remove attachment
-      this.$('imgRemove').addEventListener('click', () => this._clearAttachment())
-
-      // Paste support — capture images pasted anywhere within the widget
-      this._shadowRoot.addEventListener('paste', e => this._handlePaste(e))
-
-      // Lightbox controls
-      this.$('lightbox').addEventListener('click', e => {
-        if (e.target === this.$('lightbox') || e.target === this.$('lbClose')) {
-          this._closeLightbox()
-        }
+      // Paste anywhere in shadow DOM
+      this._sr.addEventListener('paste', e => {
+        if (!e.clipboardData) return
+        const item = Array.from(e.clipboardData.items || []).find(i => i.kind === 'file' && ACCEPTED_IMAGES.includes(i.type))
+        if (!item) return
+        e.preventDefault()
+        const f = item.getAsFile()
+        if (f) this._loadFile(f)
       })
-      this.$('lbClose').addEventListener('click', () => this._closeLightbox())
 
-      // Close lightbox on Escape
-      document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') this._closeLightbox()
+      // Close popover on outside click (document level, passive)
+      const closePop = () => this._closePop()
+      document.addEventListener('click', closePop)
+      this._sr.addEventListener('click', e => {
+        if (!plus.contains(e.target) && !pop.contains(e.target)) this._closePop()
       })
+
+      // Lightbox close
+      this.$('lb').addEventListener('click', e => {
+        if (e.target === this.$('lb') || e.target === this.$('lbX')) this._closeLB()
+      })
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') this._closeLB() })
     }
 
-    // -------------------------------------------------------------------------
-    // Image handling
-    // -------------------------------------------------------------------------
+    // ── Popover ──────────────────────────────────────────────────────────────
 
-    /**
-     * Validate and read a File object via FileReader, then show the preview.
-     * @param {File} file
-     */
-    _handleImageFile (file) {
-      if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-        this._append('bot', '\u26a0\ufe0f Unsupported file type. Please attach a JPEG, PNG, WEBP, or GIF image.')
+    _togglePop () { this._popOpen ? this._closePop() : this._openPop() }
+
+    _openPop () {
+      this._popOpen = true
+      this.$('popover').classList.add('vis')
+      this.$('btnPlus').classList.add('active')
+    }
+
+    _closePop () {
+      this._popOpen = false
+      this.$('popover').classList.remove('vis')
+      this.$('btnPlus').classList.remove('active')
+    }
+
+    // ── Pills ────────────────────────────────────────────────────────────────
+
+    _renderPills () {
+      const c = this.$('pills')
+      c.innerHTML = ''
+      let any = false
+
+      // Image pill
+      if (this._img) {
+        any = true
+        const p = document.createElement('div')
+        p.className = 'pill'
+        p.innerHTML = `<img class="pthumb" src="${this._img.dataUri}" alt="img" />
+                       <span class="plabel">${this._esc(this._img.name)}</span>
+                       <button class="prem" title="Remove">&#x2715;</button>`
+        p.querySelector('.pthumb').addEventListener('click', () => this._openLB(this._img.dataUri))
+        p.querySelector('.prem').addEventListener('click',  () => { this._img = null; this._renderPills(); this._syncSend() })
+        c.appendChild(p)
+      }
+
+      // Web search pill
+      if (this._ws) {
+        any = true
+        const p = document.createElement('div')
+        p.className = 'pill'
+        p.innerHTML = `${IC.globe}<span class="plabel">Web search</span>
+                       <button class="prem" title="Remove">&#x2715;</button>`
+        p.querySelector('.prem').addEventListener('click', () => {
+          this._ws = false
+          this.$('popWS').classList.remove('sel')
+          this._renderPills()
+          this._syncSend()
+        })
+        c.appendChild(p)
+      }
+
+      c.classList.toggle('vis', any)
+    }
+
+    // ── File handling ────────────────────────────────────────────────────────
+
+    _loadFile (file) {
+      if (!ACCEPTED_IMAGES.includes(file.type)) {
+        this._botMsg('\u26a0\ufe0f Unsupported type. Please attach a JPEG, PNG, WEBP, or GIF image.')
         return
       }
       if (file.size > MAX_IMAGE_BYTES) {
-        this._append('bot', '\u26a0\ufe0f Image exceeds the 5 MB limit. Please attach a smaller file.')
+        this._botMsg('\u26a0\ufe0f Image exceeds 5 MB. Please use a smaller file.')
         return
       }
-
-      this._showLoadingShimmer(true)
-
-      const reader = new FileReader()
-      reader.onload = e => {
-        this._showLoadingShimmer(false)
-        this._setAttachment(e.target.result, file.name, file.type)
-      }
-      reader.onerror = () => {
-        this._showLoadingShimmer(false)
-        this._append('bot', '\u26a0\ufe0f Failed to read the image file. Please try again.')
-      }
-      reader.readAsDataURL(file)
+      this.$('shimRow').classList.add('vis')
+      const r = new FileReader()
+      r.onload  = e => { this.$('shimRow').classList.remove('vis'); this._img = { dataUri: e.target.result, name: file.name, mimeType: file.type }; this._renderPills(); this._syncSend() }
+      r.onerror = () => { this.$('shimRow').classList.remove('vis'); this._botMsg('\u26a0\ufe0f Failed to read the file. Please try again.') }
+      r.readAsDataURL(file)
     }
 
-    /**
-     * Handle a paste event, extracting any image item from the clipboard.
-     * @param {ClipboardEvent} e
-     */
-    _handlePaste (e) {
-      if (!e.clipboardData) return
-      const items = Array.from(e.clipboardData.items || [])
-      const imgItem = items.find(it => it.kind === 'file' && ACCEPTED_IMAGE_TYPES.includes(it.type))
-      if (!imgItem) return
-      // Prevent browser default paste-as-text behaviour for the image blob
-      e.preventDefault()
-      const file = imgItem.getAsFile()
-      if (file) this._handleImageFile(file)
+    // ── Lightbox ─────────────────────────────────────────────────────────────
+
+    _openLB (src) { this.$('lbImg').src = src; this.$('lb').classList.add('vis') }
+    _closeLB ()   { this.$('lb').classList.remove('vis'); this.$('lbImg').src = '' }
+
+    // ── Send ─────────────────────────────────────────────────────────────────
+
+    _syncSend () {
+      this.$('btnSend').disabled = !(this.$('input').value.trim() || this._img)
     }
-
-    /**
-     * Store the resolved attachment and render the preview strip.
-     * @param {string} dataUri  - Full data-URI from FileReader
-     * @param {string} name     - Original file name
-     * @param {string} mimeType
-     */
-    _setAttachment (dataUri, name, mimeType) {
-      this._attachedImage = { dataUri, name, mimeType }
-
-      // Update preview strip
-      const thumb = this.$('previewThumb')
-      thumb.src = dataUri
-      this.$('previewMeta').textContent = name
-      this.$('imgPreview').classList.add('visible')
-      this.$('btnAttach').classList.add('active')
-
-      // Allow click on preview thumbnail to open lightbox
-      thumb.onclick = () => this._openLightbox(dataUri)
-    }
-
-    /** Remove the current attachment and reset all preview UI. */
-    _clearAttachment () {
-      this._attachedImage = null
-      this.$('imgPreview').classList.remove('visible')
-      this.$('previewThumb').src = ''
-      this.$('previewMeta').textContent = ''
-      this.$('previewThumb').onclick = null
-      this.$('btnAttach').classList.remove('active')
-    }
-
-    _showLoadingShimmer (visible) {
-      this.$('imgLoading').classList.toggle('visible', visible)
-    }
-
-    // -------------------------------------------------------------------------
-    // Lightbox
-    // -------------------------------------------------------------------------
-
-    _openLightbox (src) {
-      this.$('lbImg').src = src
-      this.$('lightbox').classList.add('open')
-    }
-
-    _closeLightbox () {
-      this.$('lightbox').classList.remove('open')
-      this.$('lbImg').src = ''
-    }
-
-    // -------------------------------------------------------------------------
-    // Send
-    // -------------------------------------------------------------------------
 
     async _send () {
-      const q         = (this.$input.value || '').trim()
-      const hasImage  = !!this._attachedImage
-      const hasText   = q.length > 0
+      const q      = (this.$('input').value || '').trim()
+      const imgSnap = this._img   ? { ...this._img } : null
+      const wsFlag  = this._ws
 
-      // Require at least one of: text or image
-      if (!hasText && !hasImage) return
+      if (!q && !imgSnap) return
 
-      // Snapshot and clear the attachment before the async gap
-      const imageSnap = this._attachedImage ? { ...this._attachedImage } : null
+      // Render user bubble first
+      this._userMsg(q, imgSnap)
 
-      // Render user bubble (image + text)
-      this._appendUserMessage(q, imageSnap)
-      this.$input.value = ''
-      this._clearAttachment()
+      // Clear input state
+      this.$('input').value = ''
+      this._resize()
+      this._img = null
+      this._renderPills()
+      this._syncSend()
 
       const apiKey = (this._props.apiKey || '').trim()
-      if (!apiKey) {
-        this._append('bot', '\u26a0\ufe0f API key not configured. Open the Builder panel.')
-        return
-      }
+      if (!apiKey) { this._botMsg('\u26a0\ufe0f API key not configured. Open the Builder panel.'); return }
 
       this._startTyping()
-      this.$send.disabled = true
+      this.$('btnSend').disabled = true
 
       try {
         const payload = {
@@ -511,110 +566,73 @@
           client_id:         this._props.clientId        || '',
           api_key_encrypted: xorEncrypt(apiKey),
           model:             this._props.model           || 'gpt-4o-mini',
+          web_search:        wsFlag,
         }
-
-        if (imageSnap) {
-          // Send only the data-URI — the backend extracts the base64 payload
-          payload.image_base64 = imageSnap.dataUri
-        }
-
-        const schemaName = (this._props.schemaName || '').trim()
-        const viewName   = (this._props.viewName   || '').trim()
-        if (schemaName && viewName) {
-          payload.schema_name = schemaName
-          payload.view_name   = viewName
-        }
+        if (imgSnap) payload.image_base64 = imgSnap.dataUri
+        const sn = (this._props.schemaName || '').trim()
+        const vn = (this._props.viewName   || '').trim()
+        if (sn && vn) { payload.schema_name = sn; payload.view_name = vn }
 
         const res = await fetch(`${BACKEND_URL}/presales/ask`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify(payload),
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
         })
 
         if (!res.ok) {
-          let detail = ''
-          try { const e = await res.json(); detail = e.detail || e.message || '' } catch (_) {}
-          throw new Error(`HTTP ${res.status} ${res.statusText}${detail ? ': ' + detail : ''}`)
+          let d = ''
+          try { const e = await res.json(); d = e.detail || e.message || '' } catch (_) {}
+          throw new Error(`HTTP ${res.status} ${res.statusText}${d ? ': ' + d : ''}`)
         }
 
-        const data    = await res.json()
-        const display = (data.answer && data.answer.trim())
-          ? data.answer
-          : (data.message || '(No response received from backend)')
-
+        const data = await res.json()
         this._stopTyping()
-        this._append('bot', display)
+        this._botMsg((data.answer && data.answer.trim()) ? data.answer : (data.message || '(No response received)'))
 
-      } catch (e) {
+      } catch (err) {
         this._stopTyping()
-        this._append('bot', `\u26a0\ufe0f ${e.message}`)
+        this._botMsg(`\u26a0\ufe0f ${err.message}`)
       } finally {
-        this.$send.disabled = false
+        this._syncSend()
       }
     }
 
-    // -------------------------------------------------------------------------
-    // Rendering helpers
-    // -------------------------------------------------------------------------
+    // ── Message rendering ────────────────────────────────────────────────────
 
-    /**
-     * Render a user message bubble that may include an image thumbnail.
-     * @param {string} text
-     * @param {{ dataUri:string, name:string }|null} imageSnap
-     */
-    _appendUserMessage (text, imageSnap) {
-      const b = document.createElement('div')
-      b.className        = 'msg user'
-      b.style.background = '#97cdf2ff'
-      b.style.border     = '1px solid #e7eaf0'
-      b.style.color      = this._props.textColor || '#0b1221'
-
-      if (imageSnap) {
+    _userMsg (text, imgSnap) {
+      const b = this._bubble('user')
+      if (imgSnap) {
         const img = document.createElement('img')
-        img.className = 'msgImg'
-        img.src       = imageSnap.dataUri
-        img.alt       = imageSnap.name || 'Attached image'
-        img.addEventListener('click', () => this._openLightbox(imageSnap.dataUri))
+        img.className = 'msgImg'; img.src = imgSnap.dataUri; img.alt = imgSnap.name || 'image'
+        img.addEventListener('click', () => this._openLB(imgSnap.dataUri))
         b.appendChild(img)
       }
-
-      if (text) {
-        const t = document.createElement('div')
-        t.textContent = text
-        b.appendChild(t)
-      }
-
-      this.$chat.appendChild(b)
-      this.$chat.scrollTop = this.$chat.scrollHeight
+      if (text) { const s = document.createElement('span'); s.textContent = text; b.appendChild(s) }
+      this.$('chat').appendChild(b)
+      this._scroll()
     }
 
-    _append (role, text) {
+    _botMsg (md) {
+      const b = this._bubble('bot')
+      b.innerHTML = this._renderMd(String(md || ''))
+      this.$('chat').appendChild(b)
+      this._scroll()
+    }
+
+    _bubble (role) {
       const b = document.createElement('div')
-      b.className        = `msg ${role === 'user' ? 'user' : 'bot'}`
-      b.style.background = role === 'user' ? '#97cdf2ff' : '#ffffff'
-      b.style.border     = '1px solid #e7eaf0'
-      b.style.color      = this._props.textColor || '#0b1221'
-
-      if (role === 'user') {
-        b.textContent = text
-      } else {
-        b.innerHTML = this._renderMarkdown(String(text || ''))
-      }
-
-      this.$chat.appendChild(b)
-      this.$chat.scrollTop = this.$chat.scrollHeight
+      b.className        = `msg ${role}`
+      b.style.background = role === 'user' ? '#ddeeff' : '#ffffff'
+      b.style.border     = '1px solid #e3e6f0'
+      b.style.color      = this._props.textColor || '#0d1117'
+      return b
     }
 
     _startTyping () {
       if (this._typingEl) return
-      const b = document.createElement('div')
-      b.className        = 'msg bot typing'
-      b.style.background = '#ffffff'
-      b.style.border     = '1px solid #e7eaf0'
-      b.style.color      = this._props.textColor || '#0b1221'
-      b.innerHTML        = `<span class="muted">PerciBOT</span><span class="dots"><span></span><span></span><span></span></span>`
-      this.$chat.appendChild(b)
-      this.$chat.scrollTop = this.$chat.scrollHeight
+      const b = this._bubble('bot')
+      b.classList.add('typing')
+      b.innerHTML = `<span style="font-size:12px;opacity:.6">PerciBOT</span><span class="dots"><b></b><b></b><b></b></span>`
+      this.$('chat').appendChild(b); this._scroll()
       this._typingEl = b
     }
 
@@ -623,16 +641,36 @@
       this._typingEl = null
     }
 
-    // -------------------------------------------------------------------------
-    // Markdown renderer (unchanged)
-    // -------------------------------------------------------------------------
+    _scroll () { const c = this.$('chat'); c.scrollTop = c.scrollHeight }
 
-    _escapeHtml (s = '') {
+    // ── Auto-grow textarea ────────────────────────────────────────────────────
+
+    _resize () {
+      const ta = this.$('input')
+      ta.style.height = '34px'
+      ta.style.height = Math.min(ta.scrollHeight, 196) + 'px'
+    }
+
+    // ── Theme ─────────────────────────────────────────────────────────────────
+
+    _applyTheme () {
+      const p = this._props, sr = this._sr
+      const grad = `linear-gradient(135deg,${p.primaryColor||'#1f4fbf'},${p.primaryDark||'#163a8a'})`
+      sr.querySelector('.wrap').style.background       = p.surfaceColor || '#fff'
+      sr.querySelector('.wrap').style.color            = p.textColor    || '#0d1117'
+      sr.querySelector('.panel').style.background      = p.surfaceAlt   || '#f8f9fc'
+      sr.querySelector('header').style.background      = grad
+      sr.querySelector('.btnSend').style.background    = grad
+    }
+
+    // ── Markdown ──────────────────────────────────────────────────────────────
+
+    _esc (s = '') {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     }
 
     _mdInline (s) {
-      let t = this._escapeHtml(s)
+      let t = this._esc(s)
       t = t.replace(/`([^`]+)`/g,       '<code>$1</code>')
       t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       t = t.replace(/\*([^*]+)\*/g,     '<em>$1</em>')
@@ -640,97 +678,58 @@
     }
 
     _mdTable (block) {
-      const raw  = block.trim().split('\n').filter(Boolean)
-      if (raw.length < 2) return null
-      const norm = raw.map(l => l.replace(/^\s*\|\s*/,'').replace(/\s*\|\s*$/,''))
-      const sep  = norm[1].split('|').map(s => s.trim())
-      if (!sep.every(c => /^:?-{3,}:?$/.test(c))) return null
-      const toCells = l => l.split('|').map(c => c.trim()).filter(c => c.length).map(c => this._mdInline(c))
-      const head = toCells(norm[0])
-      const rows = norm.slice(2).map(toCells)
-      return `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+      const rows = block.trim().split('\n').filter(Boolean)
+      if (rows.length < 2) return null
+      const norm = rows.map(l => l.replace(/^\s*\|\s*/,'').replace(/\s*\|\s*$/,''))
+      if (!norm[1].split('|').map(s=>s.trim()).every(c=>/^:?-{3,}:?$/.test(c))) return null
+      const cells = l => l.split('|').map(c=>c.trim()).filter(Boolean).map(c=>this._mdInline(c))
+      const head  = cells(norm[0]); const body = norm.slice(2).map(cells)
+      return `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`
     }
 
     _mdLists (md) {
-      const lines = md.split('\n'); const out = []; let inUl = false, inOl = false
-      const flush = () => {
-        if (inUl) { out.push('</ul>'); inUl = false }
-        if (inOl) { out.push('</ol>'); inOl = false }
+      const lines = md.split('\n'); const out = []; let ul=false, ol=false
+      const flush = () => { if(ul){out.push('</ul>');ul=false} if(ol){out.push('</ol>');ol=false} }
+      for (const l of lines) {
+        if      (/^\s*[-*]\s+/.test(l))     { if(!ul){flush();out.push('<ul>');ul=true} out.push(`<li>${this._mdInline(l.replace(/^\s*[-*]\s+/,''))}</li>`) }
+        else if (/^\s*\d+\.\s+/.test(l))    { if(!ol){flush();out.push('<ol>');ol=true} out.push(`<li>${this._mdInline(l.replace(/^\s*\d+\.\s+/,''))}</li>`) }
+        else if (l.trim()==='')             { flush(); out.push('<br/>') }
+        else                                { flush(); out.push(`<p>${this._mdInline(l)}</p>`) }
       }
-      for (const line of lines) {
-        if      (/^\s*[-*]\s+/.test(line))       { if (!inUl) { flush(); out.push('<ul>'); inUl = true } out.push(`<li>${this._mdInline(line.replace(/^\s*[-*]\s+/,''))}</li>`) }
-        else if (/^\s*\d+\.\s+/.test(line))      { if (!inOl) { flush(); out.push('<ol>'); inOl = true } out.push(`<li>${this._mdInline(line.replace(/^\s*\d+\.\s+/,''))}</li>`) }
-        else if (line.trim() === '')              { flush(); out.push('<br/>') }
-        else                                      { flush(); out.push(`<p>${this._mdInline(line)}</p>`) }
-      }
-      flush()
-      return out.join('')
+      flush(); return out.join('')
     }
 
-    _renderMarkdown (md = '') {
-      return md.split(/\n{2,}/).map(b => { const t = this._mdTable(b); return t || this._mdLists(b) }).join('\n')
+    _renderMd (md = '') {
+      return md.split(/\n{2,}/).map(b => this._mdTable(b) || this._mdLists(b)).join('\n')
     }
 
-    // -------------------------------------------------------------------------
-    // Theme
-    // -------------------------------------------------------------------------
+    // ── Dataset UI ────────────────────────────────────────────────────────────
 
-    _applyTheme () {
-      const wrap    = this._shadowRoot.querySelector('.wrap')
-      const header  = this._shadowRoot.querySelector('header')
-      const panel   = this._shadowRoot.querySelector('.panel')
-      const buttons = this._shadowRoot.querySelectorAll('button.primary')
-      wrap.style.background   = this._props.surfaceColor || '#ffffff'
-      wrap.style.color        = this._props.textColor    || '#0b1221'
-      panel.style.background  = this._props.surfaceAlt   || '#f6f8ff'
-      header.style.background = `linear-gradient(90deg, ${this._props.primaryColor || '#1f4fbf'}, ${this._props.primaryDark || '#163a8a'})`
-      buttons.forEach(btn => {
-        btn.style.background = `linear-gradient(90deg, ${this._props.primaryColor || '#1f4fbf'}, ${this._props.primaryDark || '#163a8a'})`
-      })
-    }
-
-    // -------------------------------------------------------------------------
-    // Datasets UI (unchanged)
-    // -------------------------------------------------------------------------
-
-    _parseAndApplyDatasets (jsonStr) {
+    _parseDS (jsonStr) {
       try {
-        const raw     = JSON.parse(jsonStr || '{}') || {}
-        const rebuilt = {}
-        Object.keys(raw).forEach(name => {
-          const { schema = [], rows2D = [] } = raw[name] || {}
-          const rows = rows2D.map(arr => {
-            const o = {}; for (let i = 0; i < schema.length; i++) o[schema[i]] = arr[i]; return o
-          })
-          rebuilt[name] = { schema, rows, rows2D }
+        const raw = JSON.parse(jsonStr || '{}') || {}
+        const out = {}
+        Object.keys(raw).forEach(k => {
+          const { schema=[], rows2D=[] } = raw[k] || {}
+          out[k] = { schema, rows2D, rows: rows2D.map(a => { const o={}; schema.forEach((c,i)=>o[c]=a[i]); return o }) }
         })
-        this._datasets = rebuilt
-        this._updateDatasetsUI()
-      } catch (_e) {
-        this._datasets = {}
-        this._updateDatasetsUI()
-      }
+        this._datasets = out
+      } catch { this._datasets = {} }
+      this._updateDSUI()
     }
 
-    _updateDatasetsUI () {
-      const chip   = this.$modelChip
-      const drawer = this._shadowRoot.getElementById('dsDrawer')
-      const entries = Object.entries(this._datasets || {})
-      if (!entries.length) { chip.textContent = 'AI Assistant'; drawer.style.display = 'none'; return }
-
-      const parts = entries.map(([k, v]) => `${k}: ${v.rows?.length || 0} rows`)
-      chip.textContent = parts.length > 2
-        ? `${parts.slice(0, 2).join(' \u00b7 ')} \u00b7 +${parts.length - 2} more`
-        : parts.join(' \u00b7 ')
-
-      drawer.innerHTML = entries.map(([name, ds]) => {
-        const cols = (ds.schema || []).slice(0, 12).join(', ')
-        return `<div class="ds"><div class="name">${name}</div><div>${ds.rows?.length || 0} rows</div><div>${cols}</div></div>`
-      }).join('') || '<div class="ds">No datasets</div>'
+    _updateDSUI () {
+      const chip  = this.$('modelChip'), drawer = this.$('dsDrawer')
+      const items = Object.entries(this._datasets || {})
+      if (!items.length) { chip.textContent = 'AI Assistant'; drawer.style.display = 'none'; return }
+      const pts = items.map(([k,v]) => `${k}: ${v.rows?.length||0} rows`)
+      chip.textContent = pts.length > 2 ? `${pts.slice(0,2).join(' · ')} · +${pts.length-2} more` : pts.join(' · ')
+      drawer.innerHTML = items.map(([n,d]) =>
+        `<div class="ds"><div class="name">${n}</div><div>${d.rows?.length||0} rows</div><div>${(d.schema||[]).slice(0,10).join(', ')}</div></div>`
+      ).join('') || '<div class="ds">No datasets</div>'
     }
   }
 
-  if (!customElements.get('perci-bot')) {
-    customElements.define('perci-bot', PerciBot)
-  }
+  if (!customElements.get('perci-bot')) customElements.define('perci-bot', PerciBot)
+
 }())
