@@ -116,6 +116,80 @@
     }
     .msgImg:hover { opacity:.87 }
 
+    /* ─ Chart card (bot response) ─────────────────────────────────── */
+    .chartCard {
+      margin-top:10px; border-radius:14px; overflow:hidden;
+      border:1px solid #e3e6f0; background:#fff;
+      box-shadow:0 2px 12px rgba(0,0,0,.06);
+    }
+
+    /* Shimmer placeholder while chart image loads */
+    .chartShim {
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:14px; padding:32px 20px; background:#f8f9fc;
+    }
+    .chartShim .shimStrip {
+      width:100%; height:12px; border-radius:6px;
+      background:linear-gradient(90deg,#e8ecf8 25%,#d0d6f0 50%,#e8ecf8 75%);
+      background-size:300% 100%; animation:pb-shim 1.4s ease-in-out infinite;
+    }
+    .chartShim .shimStrip:nth-child(2){width:80%}
+    .chartShim .shimStrip:nth-child(3){width:60%}
+    .chartShim .shimBars {
+      display:flex; align-items:flex-end; gap:6px; height:64px; width:100%; justify-content:center;
+    }
+    .chartShim .shimBar {
+      width:18px; border-radius:4px 4px 0 0;
+      background:linear-gradient(90deg,#e8ecf8 25%,#d0d6f0 50%,#e8ecf8 75%);
+      background-size:300% 100%; animation:pb-shim 1.4s ease-in-out infinite;
+    }
+    .chartShim .shimBar:nth-child(1){height:40%; animation-delay:.0s}
+    .chartShim .shimBar:nth-child(2){height:70%; animation-delay:.1s}
+    .chartShim .shimBar:nth-child(3){height:55%; animation-delay:.2s}
+    .chartShim .shimBar:nth-child(4){height:90%; animation-delay:.3s}
+    .chartShim .shimBar:nth-child(5){height:65%; animation-delay:.4s}
+    .chartShim .shimBar:nth-child(6){height:45%; animation-delay:.5s}
+    .chartShim .shimBar:nth-child(7){height:80%; animation-delay:.6s}
+    .chartShim .shimLabel {
+      font-size:12px; color:#8890b0; font-weight:500; letter-spacing:.2px;
+      display:flex; align-items:center; gap:6px;
+    }
+    .chartShim .shimDot {
+      width:7px; height:7px; border-radius:50%; background:#b0b8d4;
+      animation:pb-blink 1s ease-in-out infinite;
+    }
+    .chartShim .shimDot:nth-child(2){animation-delay:.18s}
+    .chartShim .shimDot:nth-child(3){animation-delay:.36s}
+
+    /* Rendered chart image */
+    .chartImg {
+      display:block; width:100%; cursor:zoom-in;
+      transition:opacity .3s ease; border-radius:0;
+    }
+    .chartImg:hover { opacity:.93 }
+
+    /* Chart footer bar */
+    .chartFooter {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:7px 12px; background:#f8f9fc; border-top:1px solid #e9ecf5;
+      font-size:11.5px; color:#7a80a0;
+    }
+    .chartFooter .cfName { font-weight:600; color:#4a5280; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    .cfDl {
+      display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600;
+      color:#1f4fbf; text-decoration:none; padding:3px 8px; border-radius:6px;
+      border:1px solid #cdd5f0; background:#eef1fc; transition:background .14s;
+    }
+    .cfDl:hover { background:#dde4fc }
+
+    /* Inline chart error — soft, one liner */
+    .chartErr {
+      display:flex; align-items:center; gap:7px;
+      margin-top:8px; padding:7px 11px; border-radius:9px;
+      background:#fff7f7; border:1px solid #ffd5d5; font-size:12px; color:#9b3030;
+    }
+    .chartErr svg { width:14px; height:14px; flex-shrink:0; color:#c94040 }
+
     /* ─ Composer wrapper ──────────────────────────────────────────── */
     .cWrap { position:relative; flex-shrink:0 }
 
@@ -533,12 +607,53 @@
       this.$('btnSend').disabled = !(this.$('input').value.trim() || this._img)
     }
 
+    // ── Dev backdoor: parse "AAAYYYZZZ::key::val::key::val::AAAYYYZZZ" ────────
+    // Supported keys: mime_type, chart_filename, chart_base64, answer
+    // Returns null if the input is not a cheat-code string.
+    _parseDevCheat (raw) {
+      const SENTINEL = 'AAAYYYZZZ'
+      const s = raw.trim()
+      if (!s.startsWith(SENTINEL + '::') || !s.endsWith('::' + SENTINEL)) return null
+      const inner = s.slice(SENTINEL.length + 2, s.length - SENTINEL.length - 2)
+      const parts  = inner.split('::')
+      const out    = {}
+      for (let i = 0; i + 1 < parts.length; i += 2) out[parts[i].trim()] = parts[i + 1]
+      // Require at least one meaningful field so random messages don't trigger
+      if (!out.answer && !out.chart_base64) return null
+      return {
+        answer:         out.answer         || '',
+        mime_type:      out.mime_type      || 'image/png',
+        chart_filename: out.chart_filename || 'chart.png',
+        chart_base64:   out.chart_base64   || '',
+      }
+    }
+
     async _send () {
       const q      = (this.$('input').value || '').trim()
       const imgSnap = this._img   ? { ...this._img } : null
       const wsFlag  = this._ws
 
       if (!q && !imgSnap) return
+
+      // ── Dev cheat-code short-circuit ──────────────────────────────
+      const cheat = q ? this._parseDevCheat(q) : null
+      if (cheat) {
+        this._userMsg('[DEV] Chart render test', null)
+        this.$('input').value = ''
+        this._resize()
+        this._syncSend()
+        this._startTyping()
+        // Small artificial delay so the shimmer is visible
+        await new Promise(r => setTimeout(r, 900))
+        this._stopTyping()
+        this._renderBotResponse({
+          answer:         cheat.answer,
+          mime_type:      cheat.mime_type,
+          chart_filename: cheat.chart_filename,
+          chart_base64:   cheat.chart_base64,
+        })
+        return
+      }
 
       // Render user bubble first
       this._userMsg(q, imgSnap)
@@ -586,7 +701,7 @@
 
         const data = await res.json()
         this._stopTyping()
-        this._botMsg((data.answer && data.answer.trim()) ? data.answer : (data.message || '(No response received)'))
+        this._renderBotResponse(data)
 
       } catch (err) {
         this._stopTyping()
@@ -594,6 +709,96 @@
       } finally {
         this._syncSend()
       }
+    }
+
+    // ── Unified bot response renderer ────────────────────────────────────────
+    // Handles: answer text (markdown) + optional chart card.
+    // Keeps text and chart in the same bubble so they're visually cohesive.
+    _renderBotResponse (data) {
+      const answerText  = (data.answer  && data.answer.trim())  ? data.answer  : (data.message || '(No response received)')
+      const hasChart    = !!(data.chart_base64 && data.mime_type)
+      const b           = this._bubble('bot')
+
+      // ① Answer text always renders first
+      const textWrap = document.createElement('div')
+      textWrap.innerHTML = this._renderMd(String(answerText))
+      b.appendChild(textWrap)
+
+      // ② Chart card
+      if (hasChart) {
+        const card = document.createElement('div')
+        card.className = 'chartCard'
+
+        // Shimmer placeholder (shown while image loads)
+        const shim = document.createElement('div')
+        shim.className = 'chartShim'
+        shim.innerHTML = `
+          <div class="shimBars">
+            <div class="shimBar"></div><div class="shimBar"></div><div class="shimBar"></div>
+            <div class="shimBar"></div><div class="shimBar"></div><div class="shimBar"></div>
+            <div class="shimBar"></div>
+          </div>
+          <div class="shimStrip"></div>
+          <div class="shimStrip"></div>
+          <div class="shimStrip"></div>
+          <div class="shimLabel">
+            <div class="shimDot"></div><div class="shimDot"></div><div class="shimDot"></div>
+            Rendering chart…
+          </div>`
+        card.appendChild(shim)
+
+        // Build the src — support both raw base64 and pre-formed data URIs
+        const rawB64  = data.chart_base64 || ''
+        const mime    = data.mime_type    || 'image/png'
+        const imgSrc  = rawB64.startsWith('data:') ? rawB64 : `data:${mime};base64,${rawB64}`
+        const fname   = (data.chart_filename || 'chart.png').replace(/^.*[\\/]/, '')
+
+        const img = document.createElement('img')
+        img.className = 'chartImg'
+        img.alt       = fname
+        img.style.opacity = '0'
+
+        img.addEventListener('load', () => {
+          shim.style.display = 'none'
+          img.style.opacity  = '1'
+          this._scroll()
+        })
+
+        img.addEventListener('error', () => {
+          shim.style.display = 'none'
+          const errEl = document.createElement('div')
+          errEl.className = 'chartErr'
+          errEl.innerHTML = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="10" cy="10" r="8"/><line x1="10" y1="6" x2="10" y2="10"/><circle cx="10" cy="14" r=".5" fill="currentColor"/>
+            </svg>Chart could not be displayed — the image data may be unavailable.`
+          card.appendChild(errEl)
+          this._scroll()
+        })
+
+        img.addEventListener('click', () => this._openLB(img.src))
+        img.src = imgSrc   // trigger load/error after listeners are wired
+
+        card.appendChild(img)
+
+        // Footer: filename + download link
+        const footer = document.createElement('div')
+        footer.className = 'chartFooter'
+        footer.innerHTML = `<span class="cfName">${this._esc(fname)}</span>`
+        const dl = document.createElement('a')
+        dl.className = 'cfDl'
+        dl.href      = imgSrc
+        dl.download  = fname
+        dl.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+            <path d="M8 2v8M5 7l3 3 3-3"/><rect x="2" y="11" width="12" height="3" rx="1.5"/>
+          </svg>Save`
+        footer.appendChild(dl)
+        card.appendChild(footer)
+
+        b.appendChild(card)
+      }
+
+      this.$('chat').appendChild(b)
+      this._scroll()
     }
 
     // ── Message rendering ────────────────────────────────────────────────────
