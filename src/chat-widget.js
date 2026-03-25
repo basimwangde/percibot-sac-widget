@@ -48,13 +48,84 @@
       padding:10px 14px; color:#fff; border-radius:12px; margin:10px 10px 0;
       min-height:44px; position:relative;
     }
+
     .brand  { font-weight:700; font-size:15px; letter-spacing:-.2px }
+
+    .headerRight {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin-left:auto;
+      padding-right:72px;
+    }
+
     .chip   {
       font-size:11px; font-weight:600; padding:3px 10px; border-radius:999px;
       background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.3);
       cursor:pointer; user-select:none; white-space:nowrap; transition:background .15s;
     }
     .chip:hover { background:rgba(255,255,255,.28) }
+
+    /* ─ Mode toggle ───────────────────────────────────────────────── */
+    .modeToggle {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      min-width:165px;
+      padding:7px 14px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.28);
+      color:#fff;
+      font-size:12px;
+      font-weight:700;
+      letter-spacing:.1px;
+      cursor:pointer;
+      user-select:none;
+      white-space:nowrap;
+      backdrop-filter:blur(10px);
+      -webkit-backdrop-filter:blur(10px);
+      box-shadow:0 6px 18px rgba(0,0,0,.14);
+      transition:
+        background .22s ease,
+        border-color .22s ease,
+        transform .12s ease,
+        box-shadow .22s ease,
+        opacity .18s ease;
+    }
+
+    .modeToggle:hover {
+      transform:translateY(-1px);
+      opacity:.96;
+    }
+
+    .modeToggle:active {
+      transform:translateY(0);
+    }
+
+    .modeToggle .modeDot {
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:currentColor;
+      opacity:.92;
+      box-shadow:0 0 0 4px rgba(255,255,255,.12);
+      flex-shrink:0;
+    }
+
+    .modeToggle .modeText {
+      white-space:nowrap;
+    }
+
+    .modeToggle.analytical {
+      background:linear-gradient(135deg, rgba(25,77,170,.95), rgba(60,130,246,.88));
+      border-color:rgba(173,210,255,.38);
+    }
+
+    .modeToggle.consultant {
+      background:linear-gradient(135deg, rgba(10,122,92,.96), rgba(49,182,137,.88));
+      border-color:rgba(171,240,219,.38);
+    }
 
     /* ─ Dataset drawer ────────────────────────────────────────────── */
     #dsDrawer {
@@ -324,6 +395,22 @@
       transition:background .14s;
     }
     .lbX:hover { background:rgba(255,255,255,.28) }
+
+    @media (max-width: 768px) {
+      .headerRight {
+        gap:8px;
+        padding-right:0;
+      }
+
+      .modeToggle {
+        min-width:auto;
+        padding:7px 12px;
+      }
+
+      .modeToggle .modeText {
+        font-size:11.5px;
+      }
+    }
   </style>
 
   <div class="wrap">
@@ -331,7 +418,16 @@
     <!-- Header -->
     <header>
       <div class="brand">PerciBOT</div>
-      <div class="chip" id="modelChip">AI Assistant</div>
+
+      <div class="headerRight">
+        <button class="modeToggle analytical" id="modeToggle" type="button" aria-label="Toggle mode">
+          <span class="modeDot"></span>
+          <span class="modeText">Analytical Mode</span>
+        </button>
+
+        <div class="chip" id="modelChip">AI Assistant</div>
+      </div>
+
       <div id="dsDrawer"></div>
     </header>
 
@@ -439,9 +535,27 @@
 
     connectedCallback () {
       if (!this.$('chat').innerHTML && this._props.welcomeText) this._botMsg(this._props.welcomeText)
+
       this.$('modelChip').addEventListener('click', () => {
         const d = this.$('dsDrawer')
         d.style.display = d.style.display === 'block' ? 'none' : 'block'
+      })
+
+      const modeToggle = this.$('modeToggle')
+      const modeText = modeToggle.querySelector('.modeText')
+
+      modeToggle.addEventListener('click', () => {
+        const isAnalytical = modeToggle.classList.contains('analytical')
+
+        if (isAnalytical) {
+          modeToggle.classList.remove('analytical')
+          modeToggle.classList.add('consultant')
+          modeText.textContent = 'Consultant Mode'
+        } else {
+          modeToggle.classList.remove('consultant')
+          modeToggle.classList.add('analytical')
+          modeText.textContent = 'Analytical Mode'
+        }
       })
     }
 
@@ -776,7 +890,7 @@
         })
 
         img.addEventListener('click', () => this._openLB(img.src))
-        img.src = imgSrc   // trigger load/error after listeners are wired
+        img.src = imgSrc
 
         card.appendChild(img)
 
