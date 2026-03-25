@@ -29,6 +29,10 @@
     send: `<svg viewBox="0 0 20 20" fill="currentColor">
              <path d="M3.1 3.1a1 1 0 0 1 1.09-.24l13 5a1 1 0 0 1 0 1.87l-13 5a1 1 0 0 1-1.33-1.33L4.9 10 2.86 4.44a1 1 0 0 1 .24-1.34z"/>
            </svg>`,
+    clear: `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 17 6"/><path d="M8 6V4h4v2"/><path d="M9 9l.01 6M11 9l.01 6"/>
+              <path d="M5 6l1 11a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-11"/>
+            </svg>`,
   }
 
   // ── Template ──────────────────────────────────────────────────────────────
@@ -232,9 +236,9 @@
     .chartShim .shimDot:nth-child(2){animation-delay:.18s}
     .chartShim .shimDot:nth-child(3){animation-delay:.36s}
 
-    /* Rendered chart image */
+    /* Rendered chart image — constrained to 60% of container width (40% reduction) */
     .chartImg {
-      display:block; width:100%; cursor:zoom-in;
+      display:block; width:60%; max-width:60%; cursor:zoom-in;
       transition:opacity .3s ease; border-radius:0;
     }
     .chartImg:hover { opacity:.93 }
@@ -344,6 +348,19 @@
     .btnSend:disabled { opacity:.3; cursor:not-allowed }
     .btnSend:not(:disabled):hover  { opacity:.86 }
     .btnSend:not(:disabled):active { transform:scale(.93) }
+
+    /* Clear chat button — sits right of send, ghost style */
+    .btnClear {
+      flex-shrink:0; width:32px; height:32px; border-radius:9px;
+      border:1.5px solid #d0d4e0; background:#fff;
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer; color:#8890b0;
+      transition:background .14s, border-color .14s, color .14s, transform .1s;
+      title:attr(title);
+    }
+    .btnClear svg { width:14px; height:14px }
+    .btnClear:hover  { background:#fff0f0; border-color:#f0a0a0; color:#c94040 }
+    .btnClear:active { transform:scale(.93) }
 
     /* ─ Plus popover ──────────────────────────────────────────────── */
     .popover {
@@ -472,6 +489,9 @@
             <button class="btnSend" id="btnSend" disabled title="Send  (Ctrl+Enter)">
               ${IC.send}
             </button>
+            <button class="btnClear" id="btnClear" title="Clear chat">
+              ${IC.clear}
+            </button>
           </div>
 
         </div>
@@ -582,6 +602,7 @@
       const ta    = this.$('input')
       const send  = this.$('btnSend')
       const plus  = this.$('btnPlus')
+      const clear = this.$('btnClear')
       const pop   = this.$('popover')
 
       // Textarea: auto-resize + send-button state
@@ -592,6 +613,9 @@
 
       // Send
       send.addEventListener('click', () => this._send())
+
+      // Clear chat — wipes all messages from the panel and shows the welcome text again
+      clear.addEventListener('click', () => this._clearChat())
 
       // Plus: toggle popover
       plus.addEventListener('click', e => { e.stopPropagation(); this._togglePop() })
@@ -651,6 +675,15 @@
       this._popOpen = false
       this.$('popover').classList.remove('vis')
       this.$('btnPlus').classList.remove('active')
+    }
+
+    // ── Clear chat ───────────────────────────────────────────────────────────
+    // Removes all messages from the panel and re-shows the welcome greeting.
+    // Does NOT reset session state — conversation memory on the backend persists.
+
+    _clearChat () {
+      this.$('chat').innerHTML = ''
+      if (this._props.welcomeText) this._botMsg(this._props.welcomeText)
     }
 
     // ── Pills ────────────────────────────────────────────────────────────────
