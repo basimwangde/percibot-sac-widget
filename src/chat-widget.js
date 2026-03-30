@@ -149,6 +149,12 @@
       border:1px solid #e3e6f0; border-radius:14px; background:#f8f9fc;
     }
 
+    /* Allow selecting/copying chat content (some hosts set user-select:none globally) */
+    .panel, .msg, .msg * {
+      user-select:text;
+      -webkit-user-select:text;
+    }
+
     /* ─ Messages ──────────────────────────────────────────────────── */
     .msg {
       max-width:82%; margin:5px 0; padding:10px 14px;
@@ -608,7 +614,14 @@
       // Textarea: auto-resize + send-button state
       ta.addEventListener('input', () => { this._resize(); this._syncSend() })
       ta.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this._send() }
+        if (e.key !== 'Enter') return
+
+        // Shift+Enter => newline (standard chat behavior)
+        if (e.shiftKey) return
+
+        // Enter, Ctrl+Enter, Cmd+Enter => send
+        e.preventDefault()
+        this._send()
       })
 
       // Send
